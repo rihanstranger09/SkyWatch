@@ -43,3 +43,6 @@ PUSH_INSTRUCTIONS.md
 .env
 *.pem
 .aws/
+
+# local design references supplied for the dashboard rebuild
+uploads/

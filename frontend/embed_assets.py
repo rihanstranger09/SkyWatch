@@ -35,11 +35,8 @@ FALLBACK_STATUS = ROOT / "frontend" / "pipeline-status.json"
 
 #: assets to inline, in payload order, with their data-URI mime type (raw base64 when None)
 BUNDLE = (
-    ("assets/ndvi-preview.png", "image/png", "hero preview render"),
-    ("assets/true-colour-128.png", "image/png", "true-colour view"),
-    ("assets/ndvi-matrix.b64", None, "NDVI matrix (128x128 float32)"),
-    ("assets/ndwi-matrix.b64", None, "NDWI matrix (128x128 float32)"),
-    ("assets/scene-meta.json", None, "scene statistics"),
+    ("assets/ndvi-preview.png", "image/png", "pipeline NDVI render (result explorer overlay)"),
+    ("assets/scene-meta.json", None, "scene statistics used by the inspector"),
 )
 
 

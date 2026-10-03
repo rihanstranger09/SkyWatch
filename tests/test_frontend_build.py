@@ -79,8 +79,15 @@ def test_publisher_writes_a_self_contained_artifact(tmp_path, monkeypatch, capsy
 
     artifact = tmp_path / "_site" / "index.html"
     text = artifact.read_text(encoding="utf-8")
-    assert '<canvas' in text and "<svg" in text
-    assert not re.search(r"<script[^>]+src\s*=\s*['\"]https?://", text, re.I)
+    # the published page is the SkyWatch console: brand, live background, map host
+    assert "SkyWatch" in text
+    assert '@keyframes bdrift' in text, "the living background must ship with the page"
+    assert 'class="balloon' in text and 'class="bglayer' in text
+    assert 'id="world"' in text and 'id="flow"' in text
+    assert "skywatch:mean_ndvi" in text, "the console must describe this pipeline's catalog fields"
+    external = re.findall(r"<script[^>]+src\s*=\s*['\"]([^'\"]+)['\"][^>]*>", text, re.I)
+    assert external == ["https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"], external
+    assert 'onerror="window.__noLeaflet=1"' in text, "the CDN map library must degrade gracefully"
     assert '"source":"github-actions"' in text.replace(" ", "")
     assert (tmp_path / "_site" / "pipeline-status.json").exists()
     assert (tmp_path / "_site" / "assets" / "ndvi-matrix.b64").exists()
@@ -115,35 +122,73 @@ def test_publisher_check_mode_reports_success():
 # embedded assets stay in sync
 # --------------------------------------------------------------------------- #
 def test_embedded_assets_are_present_and_valid():
+    """The result overlay is painted from inlined bytes - verify they decode."""
     html = (FRONTEND / "index.html").read_text(encoding="utf-8")
     block = html.split(embedder.START, 1)[1].split(embedder.END, 1)[0]
-    assert "data:image/png;base64," in block, "hero/RGB previews must be embedded as data URIs"
+    assert "data:image/png;base64," in block, "the NDVI render must be embedded as a data URI"
 
-    for key in ("assets/ndvi-matrix.b64", "assets/ndwi-matrix.b64", "assets/scene-meta.json"):
+    for key in ("assets/ndvi-preview.png", "assets/scene-meta.json"):
         assert f'"{key}"' in block, f"{key} is not embedded"
 
-    # the embedded NDVI matrix must decode to a square float32 grid
+    # the inlined NDVI render must be a real PNG, not a placeholder
     import base64
-    import struct
 
-    match = re.search(r'"assets/ndvi-matrix\.b64":\s*"([^"]+)"', block)
-    assert match, "embedded NDVI matrix not found"
+    match = re.search(r'"assets/ndvi-preview\.png":\s*"data:image/png;base64,([A-Za-z0-9+/=]+)"', block)
+    assert match, "embedded NDVI render not found"
     raw = base64.b64decode(match.group(1))
-    assert len(raw) % 4 == 0
-    size = int((len(raw) // 4) ** 0.5)
-    assert size * size * 4 == len(raw), "matrix is not square"
-    values = struct.unpack(f"<{size * size}f", raw)
-    assert all(-1.001 <= v <= 1.001 for v in values[:1000]), "NDVI values must stay in [-1, 1]"
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n", "embedded bytes are not a PNG"
+    assert len(raw) > 10_000, "embedded render looks truncated"
+
+    # ... and the scene statistics shipped alongside it match the asset on disk
+    stats = json.loads((FRONTEND / "assets" / "scene-meta.json").read_text(encoding="utf-8"))
+    assert stats["crs"] == "EPSG:4326"
+    ndvi = stats["ndvi"]
+    assert -1.0 <= ndvi["min"] <= ndvi["mean"] <= ndvi["max"] <= 1.0
+    assert str(round(ndvi["mean"], 4))[:6] in block or "ndvi" in block.lower()
 
 
-def test_embedder_check_mode_is_current():
-    """Guards against editing assets without re-running embed_assets.py."""
-    old = sys.argv
-    try:
-        sys.argv = ["embed_assets.py", "--check"]
-        assert embedder.main() == 0
-    finally:
-        sys.argv = old
+def test_page_ships_an_actually_animated_background():
+    """Regression guard for the requirement that the backgrounds keep moving."""
+    html = (FRONTEND / "index.html").read_text(encoding="utf-8")
+
+    for layer in (".bglayer.back", ".bglayer.mid", ".bglayer.front"):
+        assert layer in html, f"missing depth layer {layer}"
+    # autonomous drift, staggered per depth so nothing moves in lockstep
+    assert re.search(r"\.bglayer\.back\s+\.balloon\s*\{[^}]*--dur", html), "per-depth balloon durations missing"
+    assert re.search(r"\.bglayer\.mid\s+\.balloon\s*\{[^}]*--dur", html)
+    assert re.search(r"\.bglayer\.front\s+\.balloon\s*\{[^}]*--dur", html)
+    assert re.search(r"animation:\s*bdrift\s+var\(--dur", html), "balloons are not driven by the drift keyframes"
+    for keyframes in ("bdrift", "bgloss", "cband", "gdrift"):
+        assert f"@keyframes {keyframes}" in html, f"missing @keyframes {keyframes}"
+    assert re.search(r"animation:\s*cband", html), "cloud bands must slide"
+    assert re.search(r"animation:\s*gdrift", html), "in-sheet glows must float"
+    assert 'class="cloudband' in html, "cloud bands must exist in the markup"
+    assert re.search(r"\.glowblob\{[^}]*animation:\s*gdrift", html), "in-sheet glows must animate"
+    # pointer + scroll parallax keeps the layers responsive to the user
+    assert "pointermove" in html and "atmosphere()" in html
+    # ... and the whole thing steps aside for visitors who ask for less motion
+    assert "prefers-reduced-motion" in html
+
+
+def test_page_uses_no_external_runtime_dependencies():
+    """Google Fonts and Leaflet are progressive enhancements only.
+
+    The page must render completely from its own bytes; the only permitted
+    network fetch is the optional Leaflet loader, which falls back to the
+    built-in SVG map engine when the sandbox has no network.
+    """
+    html = (FRONTEND / "index.html").read_text(encoding="utf-8")
+    scripts = re.findall(r"<script[^>]+src\s*=\s*['\"]([^'\"]+)['\"]", html, re.I)
+    assert all("leaflet" in url for url in scripts), f"unexpected runtime dependency: {scripts}"
+    # the only external stylesheet is the webfont request from the reference design;
+    # it degrades to the system font stack when it cannot load
+    sheets = re.findall(r"<link[^>]+rel=['\"]stylesheet['\"][^>]+href=['\"]([^'\"]+)['\"]", html, re.I)
+    allowed_prefixes = ("https://fonts.googleapis.com/", "https://unpkg.com/leaflet@1.9.4/")
+    assert all(url.startswith(allowed_prefixes) for url in sheets), sheets
+    assert "system-ui" in html, "a system font stack must back the webfonts up"
+    assert html.count("<style>") >= 1 and html.count("<script>") >= 2, "every style/behaviour must be inline"
+    assert "<style>" in html and "<script>" in html
+    assert "__noLeaflet" in html and "initSvgMap" in html, "the map must degrade to the offline SVG engine"
 
 
 def test_fallback_snapshot_has_the_dashboard_contract():

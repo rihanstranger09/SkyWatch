@@ -352,14 +352,27 @@ python scripts/local_e2e.py                 # the whole thing, locally
 
 ## Live dashboard (GitHub Pages)
 
-`frontend/index.html` is a single-file, dependency-free ops console: six animated pipeline stages with a
-streaming worker log, an interactive NDVI/NDWI/true-colour canvas (hover for per-pixel values, click to zoom,
-drag to pan), an animated architecture diagram, a cost meter, the processed-image table, and the exact SAM
-template / workflow YAML with a copy button.
+`frontend/index.html` is a single-file ops console built on a "sky & sheet" editorial design (adapted from a
+supplied layout reference, which is not redistributed in this repository), wired to this repository's real
+pipeline:
 
-It is **genuinely self-contained**: the preview images and the 128×128 NDVI/NDWI matrices (produced by
-`src/indices.py` itself) are embedded, so the page renders identically from a downloaded file, behind a
-corporate proxy, inside a sandboxed iframe, or on GitHub Pages — no CDN, no network, no build step.
+- **seven pipeline stages** — `Upload · S3 event · SQS · Validate · NDVI + COG · DynamoDB · Publish` — with a
+  streaming worker log, a progress meter and per-stage durations taken from the run snapshot;
+- **a living sky** — three depth layers of balloons that drift and breathe on their own timelines
+  (46 s / 36 s / 27 s), cloud bands sliding across the sheet, orbiting specular highlights and in-sheet glows
+  that float. Scroll and pointer movement parallax the layers at different rates, and everything stands still
+  for visitors who request `prefers-reduced-motion`;
+- **the scene map** — Leaflet when the CDN is reachable, and the built-in SVG engine (coastline, range rings,
+  scale bar, pins, click-to-inspect) when it is not, so the console works fully offline;
+- **the result explorer** — the NDVI render produced by `src/indices.py` is embedded as a data URI and painted
+  into the overlay canvas with an opacity slider, alongside the scene's real statistics and a STAC item;
+- the architecture table (local path → AWS service), the cost meter, and the run's checks.
+
+It is **genuinely self-contained**: the NDVI render and the scene metadata (produced by the pipeline's own
+maths) are embedded, so the page renders identically from a downloaded file, behind a corporate proxy, inside a
+sandboxed iframe, or on GitHub Pages — no build step and no required network. The two external requests that
+remain (Google Fonts, Leaflet) are progressive enhancements that fail silently into the system font stack and
+the SVG map engine.
 
 The run snapshot comes from `frontend/pipeline-status.json` (committed fallback), and Stage 4 injects the
 real snapshot at publish time:

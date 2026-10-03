@@ -47,17 +47,29 @@ jobs:
           html = pathlib.Path("frontend/index.html").read_text(encoding="utf-8")
           errors = []
 
-          # Fully self-contained: no external <script src>, no external stylesheet.
-          if re.search(r"<script[^>]+src\s*=\s*['\"]https?://", html, re.I):
-              errors.append("external <script src> found - the dashboard must work offline")
-          if re.search(r"<link[^>]+rel=['\"]stylesheet['\"][^>]*href=['\"]https?://", html, re.I):
-              errors.append("external stylesheet found - the dashboard must work offline")
+          # Self-contained: the page must render from its own bytes. The only
+          # permitted network requests are optional enhancements that fail safe -
+          # the Leaflet map (falls back to the inline SVG engine) and webfonts
+          # (fall back to the system stack).
+          scripts = re.findall(r"<script[^>]+src\s*=\s*['\"]([^'\"]+)['\"][^>]*>", html, re.I)
+          if any("leaflet" not in url for url in scripts):
+              errors.append(f"unexpected external script source: {scripts}")
+          if scripts and 'onerror="window.__noLeaflet=1"' not in html:
+              errors.append("the CDN map library has no offline fallback")
+          sheets = re.findall(r"<link[^>]+rel=['\"]stylesheet['\"][^>]*href=['\"]([^'\"]+)['\"]", html, re.I)
+          allowed = ("https://fonts.googleapis.com/", "https://unpkg.com/leaflet@1.9.4/")
+          if any(not url.startswith(allowed) for url in sheets):
+              errors.append(f"unexpected external stylesheet: {sheets}")
           if "data:image/png;base64," not in html:
               errors.append("no embedded preview image found - run frontend/embed_assets.py")
 
-          for tag, pattern in (("canvas", r"<canvas"), ("svg", r"<svg")):
+          # the console itself must be present, not a stub
+          for what, pattern in (("map host", r'id="world"'), ("stage strip", r'id="flow"'),
+                                ("SVG map engine", r"<svg"), ("living background", r"@keyframes bdrift")):
               if not re.search(pattern, html, re.I):
-                  errors.append(f"expected at least one <{tag}> element in the dashboard")
+                  errors.append(f"expected {what} in the dashboard ({pattern})")
+          if 'class="balloon' not in html or 'class="bglayer' not in html:
+              errors.append("the animated background layers are missing")
 
           for marker in ("__PIPELINE_STATUS_START__", "__EMBEDDED_ASSETS_START__"):
               if marker not in html:
