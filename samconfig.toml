@@ -1,0 +1,23 @@
+# SAM CLI configuration - keeps `sam deploy` zero-configuration.
+# Region defaults to Mumbai (closest to Bengaluru, lowest latency for the demo).
+version = 0.1
+
+[default.global.parameters]
+region = "ap-south-1"
+
+[default.build.parameters]
+use_container = true
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+stack_name = "satellite-drone-pipeline"
+region = "ap-south-1"
+resolve_s3 = true
+resolve_image_repos = true
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+fail_on_empty_changeset = false
+image_repositories = []
+tags = "project=satellite-drone-pipeline owner=github-actions"
+parameter_overrides = "ProcessedRetentionDays=7 FunctionMemorySize=1536 FunctionTimeout=180 CreateDlqAlarm=true"

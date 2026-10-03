@@ -1,0 +1,268 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Event-Driven Satellite & Drone Imagery Pipeline.
+  S3 (raw GeoTIFF) -> SQS (+DLQ) -> Lambda container (rasterio/GDAL, NDVI + NDWI)
+  -> Cloud-Optimized GeoTIFF in S3 + metadata record in DynamoDB.
+  Sized to stay inside the AWS Free Tier (Rs.0 / month for demo-level volume).
+
+Parameters:
+  ProcessedRetentionDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 365
+    Description: Days before processed COG outputs are expired from S3 (cost hygiene).
+  FunctionMemorySize:
+    Type: Number
+    Default: 1536
+    MinValue: 512
+    MaxValue: 10240
+    Description: Lambda memory in MB (CPU scales with memory; 1536 MB = ~1 vCPU).
+  FunctionTimeout:
+    Type: Number
+    Default: 180
+    MinValue: 30
+    MaxValue: 900
+    Description: Lambda timeout in seconds. Must stay below the queue visibility timeout.
+  CreateDlqAlarm:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Create a CloudWatch alarm when the dead-letter queue is non-empty (free tier allows 10).
+
+Conditions:
+  CreateAlarm: !Equals [!Ref CreateDlqAlarm, 'true']
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Storage: raw imagery in, processed COGs + previews out
+  # ---------------------------------------------------------------------------
+  RawImageryBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: ImageryProcessingQueuePolicy
+    Properties:
+      BucketName: !Sub 'satellite-drone-raw-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteAfter3Days
+            Status: Enabled
+            ExpirationInDays: 3
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt ImageryProcessingQueue.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .tif
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt ImageryProcessingQueue.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .tiff
+      Tags:
+        - Key: Project
+          Value: satellite-drone-pipeline
+
+  ProcessedImageryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'satellite-drone-processed-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireProcessedOutputs
+            Status: Enabled
+            ExpirationInDays: !Ref ProcessedRetentionDays
+      Tags:
+        - Key: Project
+          Value: satellite-drone-pipeline
+
+  # ---------------------------------------------------------------------------
+  # Messaging: buffered, retried, and dead-lettered work queue
+  # ---------------------------------------------------------------------------
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: imagery-processing-dlq
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: Project
+          Value: satellite-drone-pipeline
+
+  ImageryProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: imagery-processing-queue
+      VisibilityTimeout: 360
+      MessageRetentionPeriod: 345600
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: Project
+          Value: satellite-drone-pipeline
+
+  # Allows S3 to publish ObjectCreated notifications into the processing queue.
+  ImageryProcessingQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref ImageryProcessingQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowS3Notifications
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt ImageryProcessingQueue.Arn
+            Condition:
+              ArnEquals:
+                # Built as a string on purpose: referencing the bucket here would create a
+                # circular dependency with the bucket's own DependsOn on this policy.
+                aws:SourceArn: !Sub 'arn:aws:s3:::satellite-drone-raw-${AWS::AccountId}'
+
+  # ---------------------------------------------------------------------------
+  # Metadata: one record per processed raster (PAY_PER_REQUEST, TTL-enabled)
+  # ---------------------------------------------------------------------------
+  MetadataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ImageryMetadata
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ImageId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ImageId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ExpiresAt
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: satellite-drone-pipeline
+
+  # ---------------------------------------------------------------------------
+  # Compute: container-image Lambda (GDAL + rasterio baked in)
+  # ---------------------------------------------------------------------------
+  GeospatialProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Architectures:
+        - x86_64
+      MemorySize: !Ref FunctionMemorySize
+      Timeout: !Ref FunctionTimeout
+      EphemeralStorage:
+        Size: 2048
+      Environment:
+        Variables:
+          OUTPUT_BUCKET: !Ref ProcessedImageryBucket
+          METADATA_TABLE: !Ref MetadataTable
+          OUTPUT_PREFIX: processed-imagery/
+          PREVIEW_PREFIX: previews/
+          WRITE_PREVIEW: 'true'
+          RED_BAND: '1'
+          GREEN_BAND: '2'
+          NIR_BAND: '4'
+          RECORD_TTL_DAYS: '30'
+          LOG_LEVEL: INFO
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub 'satellite-drone-raw-${AWS::AccountId}'
+        - S3CrudPolicy:
+            BucketName: !Sub 'satellite-drone-processed-${AWS::AccountId}'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MetadataTable
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ImageryProcessingQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+            ScalingConfig:
+              MaximumConcurrency: 5
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./src
+      DockerTag: latest
+
+  # ---------------------------------------------------------------------------
+  # Observability: alert (not in the failing path) when poison messages stack up
+  # ---------------------------------------------------------------------------
+  DeadLetterQueueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateAlarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-dlq-not-empty'
+      AlarmDescription: Messages landed in imagery-processing-dlq; inspect the Lambda logs.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  RawImageryBucketName:
+    Description: Upload GeoTIFFs here to start the pipeline.
+    Value: !Ref RawImageryBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-RawBucket'
+  ProcessedImageryBucketName:
+    Description: Processed COGs land in processed-imagery/, PNG previews in previews/.
+    Value: !Ref ProcessedImageryBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-ProcessedBucket'
+  ImageryProcessingQueueUrl:
+    Description: SQS queue that feeds the geospatial Lambda.
+    Value: !Ref ImageryProcessingQueue
+  DeadLetterQueueUrl:
+    Description: Inspect this queue when a raster repeatedly fails.
+    Value: !Ref DeadLetterQueue
+  MetadataTableName:
+    Description: DynamoDB table holding one record per processed ImageId.
+    Value: !Ref MetadataTable
+  GeospatialProcessorFunctionName:
+    Description: Container-image Lambda function name.
+    Value: !Ref GeospatialProcessorFunction
+  GeospatialProcessorFunctionArn:
+    Description: Container-image Lambda function ARN.
+    Value: !GetAtt GeospatialProcessorFunction.Arn

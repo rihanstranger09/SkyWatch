@@ -1,0 +1,36 @@
+{
+  "generatedBy": "frontend/make_ndvi_preview.py",
+  "scene": "synthetic-hero-scene",
+  "seed": 21,
+  "size": 512,
+  "matrixSize": 128,
+  "crs": "EPSG:4326",
+  "origin": [
+    77.59,
+    12.97
+  ],
+  "pixelSize": 0.0001,
+  "bounds": [
+    77.59,
+    12.918800000000001,
+    77.6412,
+    12.97
+  ],
+  "ndvi": {
+    "mean": 0.23163,
+    "min": -0.74354,
+    "max": 0.871009,
+    "std": 0.349792,
+    "valid_pixel_pct": 100.0
+  },
+  "ndwi": {
+    "mean": -0.20745,
+    "min": -0.813549,
+    "max": 0.762365,
+    "std": 0.340181,
+    "valid_pixel_pct": 100.0
+  },
+  "vegetationPct": 36.72,
+  "waterPct": 4.18,
+  "bareSoilPct": 32.75
+}

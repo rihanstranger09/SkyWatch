@@ -1,0 +1,66 @@
+name: Publish Dashboard
+
+# Frontend-only changes skip the (slower) deployment pipeline via paths-ignore,
+# so this lightweight job republishes the dashboard to GitHub Pages by itself.
+# It ships the committed fallback snapshot in frontend/pipeline-status.json.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/publish-dashboard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build & Deploy Pages Artefact
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url || steps.pages.outputs.base_url }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build Pages artefact
+        id: build
+        run: python frontend/publish_status.py --site-dir _site --status frontend/pipeline-status.json
+
+      - name: Upload Pages artifact
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: pages
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Dashboard published"
+            echo ""
+            echo "| Item | Value |"
+            echo "| --- | --- |"
+            echo "| URL | ${{ steps.pages.outputs.page_url || 'enable GitHub Pages -> Source: GitHub Actions' }} |"
+            echo "| Data | committed fallback (\`frontend/pipeline-status.json\`) |"
+          } >> "$GITHUB_STEP_SUMMARY"

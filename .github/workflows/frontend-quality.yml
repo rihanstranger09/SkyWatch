@@ -1,0 +1,102 @@
+name: Frontend Quality Check
+
+# Fast, credential-free gate that runs only when the dashboard changes.
+# The frontend is an offline, single-file, dependency-free page - so the checks
+# are: does it exist, does it still self-contain, does the embedded fallback
+# status parse, and does the Pages publisher survive a dry run?
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-quality.yml'
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-quality.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-frontend:
+    name: Validate Dashboard Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest flake8
+
+      - name: Check dashboard bundle integrity
+        run: |
+          set -euo pipefail
+          test -f frontend/index.html || { echo "frontend/index.html is missing"; exit 1; }
+          python - <<'PY'
+          import json, pathlib, re, sys
+
+          html = pathlib.Path("frontend/index.html").read_text(encoding="utf-8")
+          errors = []
+
+          # Fully self-contained: no external <script src>, no external stylesheet.
+          if re.search(r"<script[^>]+src\s*=\s*['\"]https?://", html, re.I):
+              errors.append("external <script src> found - the dashboard must work offline")
+          if re.search(r"<link[^>]+rel=['\"]stylesheet['\"][^>]*href=['\"]https?://", html, re.I):
+              errors.append("external stylesheet found - the dashboard must work offline")
+          if "data:image/png;base64," not in html:
+              errors.append("no embedded preview image found - run frontend/embed_assets.py")
+
+          for tag, pattern in (("canvas", r"<canvas"), ("svg", r"<svg")):
+              if not re.search(pattern, html, re.I):
+                  errors.append(f"expected at least one <{tag}> element in the dashboard")
+
+          for marker in ("__PIPELINE_STATUS_START__", "__EMBEDDED_ASSETS_START__"):
+              if marker not in html:
+                  errors.append(f"missing {marker} markers (publishing would not work)")
+
+          data = pathlib.Path("frontend/pipeline-status.json")
+          if data.exists():
+              parsed = json.loads(data.read_text(encoding="utf-8"))
+              for key in ("result", "image", "stages", "checks"):
+                  if key not in parsed:
+                      errors.append(f"fallback pipeline-status.json is missing '{key}'")
+          else:
+              errors.append("frontend/pipeline-status.json (embedded fallback) is missing")
+
+          print(f"index.html: {len(html) / 1024:.1f} KiB")
+          if errors:
+              print("\n".join(f"FAIL: {e}" for e in errors))
+              sys.exit(1)
+          print("frontend bundle OK (self-contained, fallback data valid)")
+          PY
+
+      - name: Embedded assets are in sync with frontend/assets
+        run: python frontend/embed_assets.py --check
+
+      - name: Lint the frontend build tooling
+        run: flake8 frontend/ tests/test_frontend_build.py --max-line-length=120 --ignore=E501,W503
+
+      - name: Test the frontend build tooling
+        run: pytest tests/test_frontend_build.py -q
+
+      - name: Dry-run the Pages publisher and boot the artefact
+        run: |
+          set -euo pipefail
+          python frontend/publish_status.py --site-dir _site --status frontend/pipeline-status.json
+          test -f _site/index.html || { echo "publisher produced no index.html"; exit 1; }
+          python - <<'PY'
+          import pathlib
+          text = pathlib.Path("_site/index.html").read_text(encoding="utf-8")
+          assert "window.__PIPELINE_STATUS__ = {" in text, "status snapshot not injected"
+          assert len(text) > 100_000, "published artefact looks truncated"
+          print(f"published artefact OK ({len(text) / 1024:.1f} KiB)")
+          PY

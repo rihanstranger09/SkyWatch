@@ -1,0 +1,282 @@
+name: Geospatial Pipeline CI/CD
+
+# Push to main  -> test -> container build -> SAM deploy -> end-to-end verification
+# Pull request  -> test only (fast, credential-free quality gate)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'frontend/**'
+      - '**/*.md'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_integration_test:
+        description: Run the end-to-end S3 -> Lambda -> DynamoDB verification after deploy
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-pipeline-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: '3.11'
+  STACK_NAME: satellite-drone-pipeline
+  AWS_REGION_DEFAULT: ap-south-1
+  TABLE_NAME: ImageryMetadata
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1 - Quality gates: lint, unit tests (moto-mocked AWS), template lint
+  # ---------------------------------------------------------------------------
+  test:
+    name: Stage 1 / Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            src/requirements.txt
+            tests/requirements-dev.txt
+
+      - name: Install Linting & Test Deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/requirements-dev.txt
+
+      - name: Lint with Flake8
+        run: flake8 src/ tests/ scripts/ --max-line-length=120 --ignore=E501,W503
+
+      - name: Run Pytest (rasterio + boto3 mocked with moto)
+        run: pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml
+
+      - name: Lint the CloudFormation template (cfn-lint)
+        run: cfn-lint template.yaml --ignore-checks W3005,W3011
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Validate SAM template
+        run: sam validate --lint
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 5
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Stage 2 + 3 - Container compilation into ECR, then SAM/CloudFormation deploy
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Stage 2+3 / Build Image & Deploy Stack
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      raw_bucket: ${{ steps.stack_outputs.outputs.raw_bucket }}
+      processed_bucket: ${{ steps.stack_outputs.outputs.processed_bucket }}
+      table_name: ${{ steps.stack_outputs.outputs.table_name }}
+      function_name: ${{ steps.stack_outputs.outputs.function_name }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Resolve AWS Account & Region
+        id: aws
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          REGION="${AWS_REGION:-}"
+          REGION="${REGION:-$AWS_REGION_DEFAULT}"
+          echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+          echo "region=$REGION" >> "$GITHUB_OUTPUT"
+          echo "ECR registry: $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
+          {
+            echo "### AWS target"
+            echo ""
+            echo "| Setting | Value |"
+            echo "| --- | --- |"
+            echo "| Account | \`$ACCOUNT_ID\` |"
+            echo "| Region | \`$REGION\` |"
+            echo "| Stack | \`$STACK_NAME\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: SAM Build (containerised Lambda, GDAL baked in)
+        run: sam build --use-container
+
+      - name: SAM Deploy (CloudFormation via change set)
+        run: |
+          sam deploy \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --stack-name "$STACK_NAME" \
+            --resolve-s3 \
+            --resolve-image-repos \
+            --capabilities CAPABILITY_IAM \
+            --region "${{ steps.aws.outputs.region }}"
+
+      - name: Read Stack Outputs
+        id: stack_outputs
+        run: |
+          set -euo pipefail
+          read_output() {
+            aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --region "${{ steps.aws.outputs.region }}" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" \
+              --output text
+          }
+          RAW_BUCKET="$(read_output RawImageryBucketName)"
+          PROCESSED_BUCKET="$(read_output ProcessedImageryBucketName)"
+          TABLE_NAME_OUT="$(read_output MetadataTableName)"
+          FUNCTION_NAME="$(read_output GeospatialProcessorFunctionName)"
+          {
+            echo "raw_bucket=$RAW_BUCKET"
+            echo "processed_bucket=$PROCESSED_BUCKET"
+            echo "table_name=$TABLE_NAME_OUT"
+            echo "function_name=$FUNCTION_NAME"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "RAW_BUCKET=$RAW_BUCKET"
+            echo "PROCESSED_BUCKET=$PROCESSED_BUCKET"
+            echo "TABLE_NAME=$TABLE_NAME_OUT"
+          } >> "$GITHUB_ENV"
+          echo "Deployed: raw=$RAW_BUCKET processed=$PROCESSED_BUCKET table=$TABLE_NAME_OUT lambda=$FUNCTION_NAME"
+
+      - name: Deployment Summary
+        run: |
+          {
+            echo "### Stack deployed"
+            echo ""
+            echo "| Resource | Value |"
+            echo "| --- | --- |"
+            echo "| Raw bucket | \`$RAW_BUCKET\` |"
+            echo "| Processed bucket | \`$PROCESSED_BUCKET\` |"
+            echo "| Metadata table | \`$TABLE_NAME\` |"
+            echo "| Lambda function | \`${{ steps.stack_outputs.outputs.function_name }}\` |"
+            echo "| ECR image | pushed by \`sam deploy --resolve-image-repos\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Stage 4 - End-to-end verification with a synthetic GeoTIFF
+  # ---------------------------------------------------------------------------
+  integration-test:
+    name: Stage 4 / End-to-End Verification
+    needs: [deploy]
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.run_integration_test)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url || steps.pages.outputs.base_url }}
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Set up Python & Geospatial Tools
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: tests/requirements-dev.txt
+
+      - name: Install Boto3 and Rasterio
+        run: pip install -r tests/requirements-dev.txt
+
+      - name: Generate & Dispatch Synthetic Raster
+        env:
+          RAW_BUCKET: ${{ needs.deploy.outputs.raw_bucket }}
+          PROCESSED_BUCKET: ${{ needs.deploy.outputs.processed_bucket }}
+          REGION: ${{ secrets.AWS_REGION }}
+          TABLE: ${{ needs.deploy.outputs.table_name }}
+        run: |
+          python tests/generate_and_upload_test.py \
+            --bucket "$RAW_BUCKET" \
+            --processed-bucket "$PROCESSED_BUCKET" \
+            --region "$REGION" \
+            --table "$TABLE" \
+            --key "ci-test-raster.tif" \
+            --timeout 240 \
+            --status-file pipeline-status.json
+
+      - name: Upload pipeline status artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-status
+          path: pipeline-status.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Publish status to GitHub Pages
+        id: publish
+        continue-on-error: true
+        run: python frontend/publish_status.py --site-dir _site --status pipeline-status.json
+
+      - name: Upload Pages artifact
+        if: steps.publish.outcome == 'success'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: pages
+        if: steps.publish.outcome == 'success'
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      - name: Integration Summary
+        if: always()
+        run: |
+          {
+            echo "### End-to-end verification"
+            echo ""
+            echo "| Item | Value |"
+            echo "| --- | --- |"
+            echo "| Status artifact | \`pipeline-status\` (14-day retention) |"
+            echo "| Dashboard | ${{ steps.pages.outputs.page_url || 'not published (enable GitHub Pages -> Source: GitHub Actions)' }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
