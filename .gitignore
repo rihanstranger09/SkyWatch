@@ -35,6 +35,10 @@ outputs/
 .DS_Store
 Thumbs.db
 
+# --- Local scratch / handoff (never commit) --------------------------------
+*.bundle
+PUSH_INSTRUCTIONS.md
+
 # --- Secrets (never commit) -------------------------------------------------
 .env
 *.pem
