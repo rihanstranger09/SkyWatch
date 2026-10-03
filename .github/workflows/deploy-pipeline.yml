@@ -96,11 +96,27 @@ jobs:
       processed_bucket: ${{ steps.stack_outputs.outputs.processed_bucket }}
       table_name: ${{ steps.stack_outputs.outputs.table_name }}
       function_name: ${{ steps.stack_outputs.outputs.function_name }}
+      deployed: ${{ steps.aws_creds.outputs.has_aws }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Stage 1 is credential-free, so a repository without AWS secrets still
+      # gets a green run: deployment steps are skipped instead of failing.
+      - name: Check for AWS credentials
+        id: aws_creds
+        run: |
+          set -euo pipefail
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "has_aws=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=AWS credentials found::Stages 2-4 (build, deploy, verify) will run."
+          else
+            echo "has_aws=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=AWS secrets not configured::Stage 1 passed. Add AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_REGION to Settings -> Secrets and variables -> Actions to enable deployment."
+          fi
+
       - name: Configure AWS Credentials
+        if: steps.aws_creds.outputs.has_aws == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -108,11 +124,13 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Set up AWS SAM CLI
+        if: steps.aws_creds.outputs.has_aws == 'true'
         uses: aws-actions/setup-sam@v2
         with:
           use-installer: true
 
       - name: Resolve AWS Account & Region
+        if: steps.aws_creds.outputs.has_aws == 'true'
         id: aws
         run: |
           set -euo pipefail
@@ -133,9 +151,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: SAM Build (containerised Lambda, GDAL baked in)
+        if: steps.aws_creds.outputs.has_aws == 'true'
         run: sam build --use-container
 
       - name: SAM Deploy (CloudFormation via change set)
+        if: steps.aws_creds.outputs.has_aws == 'true'
         run: |
           sam deploy \
             --no-confirm-changeset \
@@ -147,6 +167,7 @@ jobs:
             --region "${{ steps.aws.outputs.region }}"
 
       - name: Read Stack Outputs
+        if: steps.aws_creds.outputs.has_aws == 'true'
         id: stack_outputs
         run: |
           set -euo pipefail
@@ -175,6 +196,7 @@ jobs:
           echo "Deployed: raw=$RAW_BUCKET processed=$PROCESSED_BUCKET table=$TABLE_NAME_OUT lambda=$FUNCTION_NAME"
 
       - name: Deployment Summary
+        if: steps.aws_creds.outputs.has_aws == 'true'
         run: |
           {
             echo "### Stack deployed"
@@ -194,7 +216,10 @@ jobs:
   integration-test:
     name: Stage 4 / End-to-End Verification
     needs: [deploy]
-    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.run_integration_test)
+    if: |
+      github.event_name != 'pull_request' &&
+      needs.deploy.outputs.deployed == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.run_integration_test)
     runs-on: ubuntu-latest
     permissions:
       contents: read
