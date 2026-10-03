@@ -6,8 +6,8 @@ GeoTIFF outputs back to S3 and a metadata record to DynamoDB — then **proves i
 GitHub Actions pipeline that builds the image, deploys the stack with AWS SAM, and runs a synthetic-raster
 integration test.
 
-[![Geospatial Pipeline CI/CD](https://github.com/__REPO__/actions/workflows/deploy-pipeline.yml/badge.svg)](https://github.com/__REPO__/actions/workflows/deploy-pipeline.yml)
-[![Frontend Quality](https://github.com/__REPO__/actions/workflows/frontend-quality.yml/badge.svg)](https://github.com/__REPO__/actions/workflows/frontend-quality.yml)
+[![Geospatial Pipeline CI/CD](https://github.com/rihanstranger09/SkyWatch/actions/workflows/deploy-pipeline.yml/badge.svg)](https://github.com/rihanstranger09/SkyWatch/actions/workflows/deploy-pipeline.yml)
+[![Frontend Quality](https://github.com/rihanstranger09/SkyWatch/actions/workflows/frontend-quality.yml/badge.svg)](https://github.com/rihanstranger09/SkyWatch/actions/workflows/frontend-quality.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11-3776ab.svg)
 ![Runtime](https://img.shields.io/badge/Lambda-container%20image-ff9900.svg)
@@ -136,7 +136,7 @@ decouples ingest bursts (a drone flight uploading 400 tiles) from concurrency.
 ## Quickstart (local, no AWS account)
 
 ```bash
-git clone https://github.com/__REPO__.git
+git clone https://github.com/rihanstranger09/SkyWatch.git
 cd satellite-drone-pipeline
 
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
