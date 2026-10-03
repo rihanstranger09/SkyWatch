@@ -89,6 +89,11 @@ def _install_simulated_worker(aws, monkeypatch, key: str = itest.DEFAULT_KEY, me
 
 def test_script_verifies_pipeline_and_writes_snapshot(aws, tmp_path, monkeypatch):
     _install_simulated_worker(aws, monkeypatch)
+    # The snapshot is tagged with where it came from, so drop the runner's own
+    # GITHUB_ACTIONS variable: on a GitHub runner the script would (correctly)
+    # write "github-actions" and this assertion used to fail there. The CI label
+    # itself is covered by test_script_tags_snapshots_from_ci below.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     status_path = tmp_path / "pipeline-status.json"
 
     exit_code = itest.main(
@@ -117,6 +122,37 @@ def test_script_verifies_pipeline_and_writes_snapshot(aws, tmp_path, monkeypatch
     ]
     assert all(check["ok"] for check in status["checks"])
     assert status["image"]["width"] == 64 and status["image"]["bands"] == 4
+
+
+def test_script_tags_snapshots_from_ci(aws, tmp_path, monkeypatch):
+    """Stage 4 runs on a GitHub runner: the snapshot must say so, and carry the run context."""
+    _install_simulated_worker(aws, monkeypatch)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_RUN_NUMBER", "7")
+    monkeypatch.setenv("GITHUB_SHA", "cafebabe")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "rihanstranger09/SkyWatch")
+    status_path = tmp_path / "ci-status.json"
+
+    exit_code = itest.main(
+        [
+            "--bucket", RAW_BUCKET,
+            "--region", REGION,
+            "--processed-bucket", PROCESSED_BUCKET,
+            "--table", TABLE_NAME,
+            "--status-file", str(status_path),
+            "--width", "64",
+            "--height", "64",
+            "--timeout", "20",
+            "--poll-interval", "0.01",
+        ]
+    )
+
+    assert exit_code == 0
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    assert status["source"] == "github-actions"
+    assert status["github"]["runNumber"] == "7"
+    assert status["github"]["sha"] == "cafebab"  # abbreviated to the 7-char form GitHub uses
+    assert status["github"]["repository"] == "rihanstranger09/SkyWatch"
 
 
 def test_script_fails_fast_when_worker_reports_failure(aws, tmp_path, monkeypatch):
