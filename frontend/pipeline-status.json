@@ -1,0 +1,111 @@
+{
+  "source": "embedded-fallback",
+  "generatedAt": "2026-10-03T06:57:00+00:00",
+  "stack": "satellite-drone-pipeline",
+  "region": "ap-south-1",
+  "github": {
+    "repository": null,
+    "runNumber": null,
+    "sha": null,
+    "runUrl": null
+  },
+  "image": {
+    "id": "ci-test-raster",
+    "key": "ci-test-raster.tif",
+    "bucket": "satellite-drone-raw-000000000000",
+    "sizeBytes": 872979,
+    "width": 256,
+    "height": 256,
+    "bands": 4,
+    "crs": "EPSG:4326",
+    "origin": [
+      77.59,
+      12.97
+    ],
+    "pixelSize": 0.0001
+  },
+  "result": {
+    "status": "SUCCEEDED",
+    "durationMs": 117,
+    "wallClockMs": 842,
+    "ndvi": {
+      "mean": 0.23163,
+      "min": -0.74354,
+      "max": 0.87101,
+      "std": 0.34979,
+      "validPixelPct": 100.0
+    },
+    "ndwi": {
+      "mean": -0.20745
+    },
+    "outputKey": "processed-imagery/ci-test-raster_ndvi_cog.tif",
+    "outputSizeBytes": 463090,
+    "previewKey": "previews/ci-test-raster_ndvi.png",
+    "bounds": [
+      77.59,
+      12.9444,
+      77.6156,
+      12.97
+    ]
+  },
+  "stages": [
+    {
+      "name": "Upload",
+      "status": "success",
+      "durationMs": 214,
+      "detail": "ci-test-raster.tif \u2192 s3://raw-imagery/"
+    },
+    {
+      "name": "S3 notification",
+      "status": "success",
+      "durationMs": 68,
+      "detail": "ObjectCreated:* \u2192 imagery-processing-queue"
+    },
+    {
+      "name": "Lambda (container)",
+      "status": "success",
+      "durationMs": 117,
+      "detail": "NDVI mean 0.2316 \u00b7 256\u00d7256 px"
+    },
+    {
+      "name": "COG + DynamoDB write",
+      "status": "success",
+      "durationMs": 96,
+      "detail": "processed-imagery/ci-test-raster_ndvi_cog.tif"
+    },
+    {
+      "name": "Preview render",
+      "status": "success",
+      "durationMs": 41,
+      "detail": "previews/ci-test-raster_ndvi.png"
+    },
+    {
+      "name": "Verification",
+      "status": "success",
+      "durationMs": 106,
+      "detail": "COG header + PNG re-read with rasterio"
+    }
+  ],
+  "checks": [
+    {
+      "name": "Processed COG present in S3",
+      "ok": true,
+      "detail": "463090 bytes"
+    },
+    {
+      "name": "COG header readable (rasterio)",
+      "ok": true,
+      "detail": "GTiff \u00b7 2 bands \u00b7 EPSG:4326 \u00b7 tiled"
+    },
+    {
+      "name": "PNG preview present",
+      "ok": true,
+      "detail": "previews/ci-test-raster_ndvi.png"
+    },
+    {
+      "name": "DynamoDB record Status=SUCCEEDED",
+      "ok": true,
+      "detail": "ImageId=ci-test-raster"
+    }
+  ]
+}
