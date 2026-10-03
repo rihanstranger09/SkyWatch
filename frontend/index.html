@@ -624,59 +624,119 @@ footer{padding:0 0 clamp(110px,14vh,170px)}
 }
 
 /* ==========================================================================
-   Living sky — animated background layers (SkyWatch)
-   Balloons drift and breathe on their own timelines, cloud bands slide across
-   the page, in-sheet glows float, and three depth layers answer scroll and
-   pointer movement at different rates.
+   Living sky — the backdrop is never still (SkyWatch)
+   Six motions run at once: a huge veil of colour slowly turns behind the page,
+   each depth layer pans at its own rate, balloons drift / breathe / rotate on
+   their own timelines, cloud bands slide across the sheet in both directions,
+   motes rise through the frame, and in-sheet glows float. Scroll and pointer
+   movement parallax the layers on top of that, and everything stands still for
+   visitors who ask for less motion.
    ========================================================================== */
-.bglayer{will-change:transform}
+
+/* (1) the veil: one very large blurred colour field, turning forever */
+.skyveil{
+  position:fixed;inset:-45%;z-index:0;pointer-events:none;opacity:.42;
+  background:conic-gradient(from 0deg,
+    rgba(126,160,255,.34), rgba(255,178,222,.30), rgba(255,232,160,.26),
+    rgba(150,236,204,.32), rgba(180,168,255,.30), rgba(126,160,255,.34));
+  filter:blur(70px);animation:skyTurn 150s linear infinite
+}
+@keyframes skyTurn{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+
+/* (2) depth layers pan continuously; the parallax writes --px / --py into the
+       same keyframes, so ambient motion and user input add up instead of
+       fighting over `transform` */
+.bglayer{
+  will-change:transform;
+  animation:bpan var(--pan,110s) ease-in-out infinite alternate
+}
+@keyframes bpan{
+  from{transform:translate3d(calc(var(--px, 0px) - 2.4vw),calc(var(--py, 0px) + 1.2vh),0) scale(1.03)}
+  to  {transform:translate3d(calc(var(--px, 0px) + 2.4vw),calc(var(--py, 0px) - 1.8vh),0) scale(1.1)}
+}
+.bglayer.back{--pan:150s}
+.bglayer.mid{--pan:104s}
+.bglayer.front{--pan:72s}
+
+/* (3) balloons: long, wide travel with breathing and rotation */
 .bglayer .balloon{
-  --dx:3.4vw;--dy:-4.4vh;--dur:30s;--dl:0s;
+  --dx:7vw;--dy:-8vh;--dur:26s;--dl:0s;--rot:3.5deg;
   animation:bdrift var(--dur) ease-in-out var(--dl) infinite;
-  will-change:transform,filter
+  will-change:transform
 }
 @keyframes bdrift{
   0%  {transform:translate3d(0,0,0) rotate(0deg) scale(1)}
-  22% {transform:translate3d(calc(var(--dx)*.55),calc(var(--dy)*.45),0) rotate(1.4deg) scale(1.03)}
-  48% {transform:translate3d(var(--dx),var(--dy),0) rotate(-1.1deg) scale(1.055)}
-  74% {transform:translate3d(calc(var(--dx)*.3),calc(var(--dy)*1.4),0) rotate(.7deg) scale(1.02)}
+  25% {transform:translate3d(calc(var(--dx)*.6),calc(var(--dy)*.5),0) rotate(calc(var(--rot)*.4)) scale(1.05)}
+  50% {transform:translate3d(var(--dx),var(--dy),0) rotate(var(--rot)) scale(1.12)}
+  75% {transform:translate3d(calc(var(--dx)*-.35),calc(var(--dy)*1.5),0) rotate(calc(var(--rot)*-.5)) scale(1.06)}
   100%{transform:translate3d(0,0,0) rotate(0deg) scale(1)}
 }
-.bglayer.back  .balloon{--dur:46s}
-.bglayer.mid   .balloon{--dur:36s}
-.bglayer.front .balloon{--dur:27s}
-.bglayer .balloon:nth-child(2n)  {--dx:-3.9vw;--dy:4.8vh;--dur:41s;--dl:-7s}
-.bglayer .balloon:nth-child(3n)  {--dx:2.4vw;--dy:5.6vh;--dur:52s;--dl:-19s}
-.bglayer .balloon:nth-child(4n)  {--dx:-2.2vw;--dy:-5.2vh;--dur:34s;--dl:-26s}
-/* the specular highlight inside every balloon slowly orbits its surface */
-.balloon::after{animation:bgloss 11s ease-in-out infinite}
-.bglayer .balloon:nth-child(2n)::after{animation-duration:15s;animation-delay:-4s}
+.bglayer.back  .balloon{--dur:38s}
+.bglayer.mid   .balloon{--dur:26s}
+.bglayer.front .balloon{--dur:20s;--dx:9vw;--dy:-10vh;--rot:5deg}   /* closest to the camera, moves the most */
+.bglayer .balloon:nth-child(2n){--dx:-8.5vw;--dy:9vh;--dur:34s;--dl:-6s;--rot:-4deg}
+.bglayer .balloon:nth-child(3n){--dx:5.5vw;--dy:11vh;--dur:41s;--dl:-17s;--rot:5deg}
+.bglayer .balloon:nth-child(4n){--dx:-6vw;--dy:-10vh;--dur:29s;--dl:-23s;--rot:-3deg}
+
+/* (4) the specular highlight orbits the balloon surface */
+.balloon::after{animation:bgloss 9s ease-in-out infinite}
+.bglayer .balloon:nth-child(2n)::after{animation-duration:13s;animation-delay:-4s}
 @keyframes bgloss{
   0%,100%{transform:translate(0,0) scale(1);opacity:.95}
-  50%    {transform:translate(16%,12%) scale(1.18);opacity:.65}
+  35%    {transform:translate(34%,26%) scale(1.3);opacity:.55}
+  70%    {transform:translate(-18%,40%) scale(1.15);opacity:.8}
 }
-/* drifting cloud bands */
+
+/* (5) cloud bands slide across the sheet, alternating direction */
 .cloudband{
-  position:absolute;left:-40vw;top:var(--ct,20vh);width:170vw;height:var(--ch,24vh);border-radius:50%;
-  background:radial-gradient(closest-side,rgba(255,255,255,.95),rgba(255,255,255,.35) 55%,rgba(255,255,255,0) 78%);
-  filter:blur(30px);opacity:.55;animation:cband var(--cd,78s) ease-in-out var(--cdl,0s) infinite alternate
+  position:absolute;left:-45vw;top:var(--ct,20vh);width:180vw;height:var(--ch,24vh);border-radius:50%;
+  background:radial-gradient(closest-side,rgba(255,255,255,.95),rgba(255,255,255,.42) 52%,rgba(255,255,255,0) 78%);
+  filter:blur(28px);opacity:.6;
+  animation:cband var(--cd,60s) ease-in-out var(--cdl,0s) infinite alternate
 }
 @keyframes cband{
-  from{transform:translate3d(-6vw,0,0) scale(1)}
-  to  {transform:translate3d(16vw,-3vh,0) scale(1.12)}
+  from{transform:translate3d(-14vw,1.5vh,0) scale(1)}
+  to  {transform:translate3d(22vw,-3vh,0) scale(1.18)}
 }
-.bglayer.front .cloudband{opacity:.35;filter:blur(42px)}
-/* pastel glows living inside the sheets now float too */
-.glowblob{will-change:transform;animation:gdrift var(--gd,28s) ease-in-out var(--gdl,0s) infinite alternate}
+.bglayer.mid .cloudband:nth-child(2){animation-direction:alternate-reverse}
+.bglayer.front .cloudband{opacity:.4;filter:blur(40px)}
+
+/* (6) motes rising through the frame - the most visible cue that the sky lives */
+#motes{
+  position:fixed;inset:0;z-index:2;pointer-events:none;overflow:hidden;
+  transform:translate3d(var(--mx2,0px),var(--my2,0px),0)
+}
+#motes i{
+  position:absolute;left:var(--ml,50vw);top:112vh;width:var(--ms,7px);height:var(--ms,7px);border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.98),var(--mc,rgba(150,190,247,.8)) 55%,rgba(255,255,255,0) 76%);
+  box-shadow:0 0 18px 2px var(--mc,rgba(150,190,247,.55));opacity:0;
+  animation:moteRise var(--md,26s) linear var(--mdl,0s) infinite
+}
+@keyframes moteRise{
+  0%  {transform:translate3d(0,0,0) scale(.7);opacity:0}
+  8%  {opacity:.85}
+  50% {transform:translate3d(var(--mdx,3vw),-56vh,0) scale(1)}
+  90% {opacity:.5}
+  100%{transform:translate3d(calc(var(--mdx,3vw)*1.7),-120vh,0) scale(.85);opacity:0}
+}
+
+/* (7) pastel glows inside the sheets float too */
+.glowblob{will-change:transform;animation:gdrift var(--gd,26s) ease-in-out var(--gdl,0s) infinite alternate}
 @keyframes gdrift{
-  from{transform:translate3d(0,0,0) scale(1)}
-  to  {transform:translate3d(38px,-30px,0) scale(1.16)}
+  from{transform:translate3d(-18px,10px,0) scale(.98)}
+  to  {transform:translate3d(46px,-38px,0) scale(1.22)}
 }
-.sheet.dark .glowblob{--gd:34s}
-.sheet:not(.dark) .glowblob{--gd:24s}
+.sheet.dark .glowblob{--gd:32s}
+.sheet:not(.dark) .glowblob{--gd:22s}
+
+/* (8) small screens keep the motion, just closer to the camera */
 @media(max-width:760px){
-  .cloudband{opacity:.4}
-  .bglayer .balloon{--dx:2vw;--dy:-3vh}
+  .balloon{--dx:4vw;--dy:-5vh}
+  .cloudband{opacity:.45}
+  #motes i{--ms:5px}
+}
+@media(prefers-reduced-motion:reduce){
+  .skyveil,#motes{display:none}
 }
 </style>
 </head>
@@ -703,6 +763,21 @@ window.__EMBEDDED_ASSETS__ = {
 </script>
 
 <!-- balloon atmosphere -->
+<div class="skyveil" aria-hidden="true"></div>
+<div id="motes" aria-hidden="true">
+  <i style="--ml:4vw;--ms:9px;--md:34s;--mdl:-2s;--mdx:2.5vw;--mc:rgba(150,190,247,.75);opacity:0"></i>
+  <i style="--ml:11vw;--ms:5px;--md:26s;--mdl:-17s;--mdx:-1.8vw;--mc:rgba(255,178,222,.65);opacity:0"></i>
+  <i style="--ml:19vw;--ms:7px;--md:41s;--mdl:-9s;--mdx:3.4vw;--mc:rgba(150,236,204,.7);opacity:0"></i>
+  <i style="--ml:28vw;--ms:4px;--md:30s;--mdl:-25s;--mdx:-2.6vw;--mc:rgba(255,232,160,.6);opacity:0"></i>
+  <i style="--ml:37vw;--ms:10px;--md:47s;--mdl:-5s;--mdx:2.2vw;--mc:rgba(180,168,255,.68);opacity:0"></i>
+  <i style="--ml:46vw;--ms:6px;--md:24s;--mdl:-31s;--mdx:-3.2vw;--mc:rgba(150,190,247,.72);opacity:0"></i>
+  <i style="--ml:55vw;--ms:8px;--md:38s;--mdl:-14s;--mdx:1.6vw;--mc:rgba(255,178,222,.62);opacity:0"></i>
+  <i style="--ml:63vw;--ms:4px;--md:28s;--mdl:-22s;--mdx:-2.1vw;--mc:rgba(150,236,204,.66);opacity:0"></i>
+  <i style="--ml:72vw;--ms:7px;--md:44s;--mdl:-3s;--mdx:3.8vw;--mc:rgba(255,232,160,.58);opacity:0"></i>
+  <i style="--ml:81vw;--ms:5px;--md:33s;--mdl:-19s;--mdx:-1.4vw;--mc:rgba(180,168,255,.64);opacity:0"></i>
+  <i style="--ml:89vw;--ms:9px;--md:52s;--mdl:-8s;--mdx:2.8vw;--mc:rgba(150,190,247,.7);opacity:0"></i>
+  <i style="--ml:96vw;--ms:6px;--md:36s;--mdl:-28s;--mdx:-2.4vw;--mc:rgba(255,178,222,.6);opacity:0"></i>
+</div>
 <div class="bglayer back">
   <i class="balloon soft"  style="--a:#b9f0d8;--b:#8ee0bd;--c:#57c79a;--glow:rgba(120,220,180,.42);left:-8vw;top:34vh;width:30vmax;height:30vmax"></i>
   <i class="balloon"       style="--a:#cfe2ff;--b:#9cc4f7;--c:#5f92e6;--glow:rgba(150,190,247,.45);left:22vw;top:-10vh;width:26vmax;height:26vmax"></i>
@@ -713,6 +788,7 @@ window.__EMBEDDED_ASSETS__ = {
 <div class="bglayer mid">
   <i class="cloudband" style="--ct:46vh;--ch:22vh;--cd:96s"></i>
   <i class="cloudband" style="--ct:118vh;--ch:30vh;--cd:132s;--cdl:-24s;opacity:.4"></i>
+  <i class="cloudband" style="--ct:6vh;--ch:16vh;--cd:52s;--cdl:-30s;opacity:.45"></i>
   <i class="balloon verysoft" style="--a:#dff0ff;--b:#bcd9f8;--c:#8fb6e8;--glow:rgba(160,200,245,.32);left:10vw;top:96vh;width:22vmax;height:22vmax"></i>
   <i class="balloon verysoft" style="--a:#ffe6f3;--b:#f8bcd8;--c:#e58fb8;--glow:rgba(247,168,208,.3);right:12vw;top:150vh;width:20vmax;height:20vmax"></i>
 </div>
@@ -731,7 +807,6 @@ window.__EMBEDDED_ASSETS__ = {
 
 <!-- ============================ BALLOONS IN FRONT ============================ -->
 <div class="bglayer front">
-  <i class="cloudband" style="--ct:34vh;--ch:18vh;--cd:64s;--cdl:-12s"></i>
   <i class="balloon edge soft" style="--a:#e9f1ff;--b:#b6d3f8;--c:#7ba7e6;--glow:rgba(150,190,247,.5);left:-6vw;top:62vh;width:13vmax;height:13vmax"></i>
   <i class="balloon edge soft" style="--a:#ffe0f0;--b:#f8b4d6;--c:#e279aa;--glow:rgba(247,168,208,.5);right:-4vw;top:24vh;width:11vmax;height:11vmax"></i>
 </div>
@@ -2110,6 +2185,7 @@ addEventListener('scroll', () => {
       .map(([selector, factor]) => ({ el: $(selector), factor }))
       .filter(l => l.el);
     const blobs = [...document.querySelectorAll('.glowblob')];
+    const motes = $('#motes');
     let px = 0, py = 0, tx = 0, ty = 0, raf = 0;
 
     addEventListener('pointermove', e => {
@@ -2125,9 +2201,17 @@ addEventListener('scroll', () => {
         tx += (px - tx) * .06;
         ty += (py - ty) * .06;
         const y = scrollY;
+        /* The layers' own pan/breathe animation reads these two variables, so the
+           ambient motion and the visitor's input compose instead of clobbering
+           each other's `transform`. */
         layers.forEach(({ el, factor }) => {
-          el.style.transform = `translate3d(${(-tx * 16 * factor / .2).toFixed(2)}px,${(-y * factor - ty * 14 * factor / .2).toFixed(2)}px,0)`;
+          el.style.setProperty('--px', (-tx * 16 * factor / .2).toFixed(2) + 'px');
+          el.style.setProperty('--py', (-y * factor - ty * 14 * factor / .2).toFixed(2) + 'px');
         });
+        if (motes) {
+          motes.style.setProperty('--mx2', (-tx * 22).toFixed(2) + 'px');
+          motes.style.setProperty('--my2', (-ty * 16).toFixed(2) + 'px');
+        }
         blobs.forEach((b, i) => {
           b.style.marginLeft = (-tx * (6 + i * 2)).toFixed(2) + 'px';
           b.style.marginTop = (-ty * (5 + i)).toFixed(2) + 'px';

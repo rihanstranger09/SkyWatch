@@ -158,14 +158,24 @@ def test_page_ships_an_actually_animated_background():
     assert re.search(r"\.bglayer\.mid\s+\.balloon\s*\{[^}]*--dur", html)
     assert re.search(r"\.bglayer\.front\s+\.balloon\s*\{[^}]*--dur", html)
     assert re.search(r"animation:\s*bdrift\s+var\(--dur", html), "balloons are not driven by the drift keyframes"
-    for keyframes in ("bdrift", "bgloss", "cband", "gdrift"):
+    for keyframes in ("bdrift", "bgloss", "cband", "gdrift", "bpan", "skyTurn", "moteRise"):
         assert f"@keyframes {keyframes}" in html, f"missing @keyframes {keyframes}"
+    # the veil turns, the layers pan, and the motes rise
+    assert '.skyveil' in html and 'id="motes"' in html
+    assert re.search(r"\.skyveil\{[^}]*animation:\s*skyTurn", html), "the veil must turn"
+    assert re.search(r"\.bglayer\{[^}]*animation:\s*bpan", html), "the depth layers must pan"
+    assert re.search(r"@keyframes bpan\{[^}]*var\(--px", html), "the pan must compose with the parallax variables"
+    assert html.count('class="cloudband"') >= 3, "cloud bands must slide in more than one place"
+    assert re.search(r"#motes i\{[^}]*animation:\s*moteRise", html)
+    assert re.search(r"\.bglayer \.balloon\{[^}]*--dx:7vw", html), "balloon travel must be visible"
+    assert re.search(r"\.bglayer\.front \.balloon\{[^}]*--dx:9vw", html), "the front layer must travel furthest"
     assert re.search(r"animation:\s*cband", html), "cloud bands must slide"
     assert re.search(r"animation:\s*gdrift", html), "in-sheet glows must float"
     assert 'class="cloudband' in html, "cloud bands must exist in the markup"
     assert re.search(r"\.glowblob\{[^}]*animation:\s*gdrift", html), "in-sheet glows must animate"
     # pointer + scroll parallax keeps the layers responsive to the user
     assert "pointermove" in html and "atmosphere()" in html
+    assert "style.setProperty('--px'" in html and "style.setProperty('--py'" in html
     # ... and the whole thing steps aside for visitors who ask for less motion
     assert "prefers-reduced-motion" in html
 

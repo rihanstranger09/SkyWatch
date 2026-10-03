@@ -358,10 +358,13 @@ pipeline:
 
 - **seven pipeline stages** — `Upload · S3 event · SQS · Validate · NDVI + COG · DynamoDB · Publish` — with a
   streaming worker log, a progress meter and per-stage durations taken from the run snapshot;
-- **a living sky** — three depth layers of balloons that drift and breathe on their own timelines
-  (46 s / 36 s / 27 s), cloud bands sliding across the sheet, orbiting specular highlights and in-sheet glows
-  that float. Scroll and pointer movement parallax the layers at different rates, and everything stands still
-  for visitors who request `prefers-reduced-motion`;
+- **a living sky** — six motions run at once: a huge blurred veil of colour turns behind the page (150 s per
+  revolution), the three depth layers each pan and breathe on their own clock (72 s / 104 s / 150 s), balloons
+  travel up to 9 vw and breathe to 1.12× scale with a slow rotation, cloud bands slide across the sheet in both
+  directions, twelve motes rise through the frame on 24–52 s cycles, and in-sheet glows float. Scroll and pointer
+  movement parallax the layers on top of all of that (the ambient pan and the parallax compose through `--px` /
+  `--py`, so neither clobbers the other), and every one of these stands still for visitors who request
+  `prefers-reduced-motion`;
 - **the scene map** — Leaflet when the CDN is reachable, and the built-in SVG engine (coastline, range rings,
   scale bar, pins, click-to-inspect) when it is not, so the console works fully offline;
 - **the result explorer** — the NDVI render produced by `src/indices.py` is embedded as a data URI and painted
