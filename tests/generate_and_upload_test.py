@@ -7,7 +7,7 @@ Flow
 2. Upload it to ``s3://<raw-bucket>/ci-test-raster.tif`` (S3 notification -> SQS -> Lambda).
 3. Poll DynamoDB until the worker writes a terminal record for that ``ImageId``.
 4. Verify the processed Cloud-Optimized GeoTIFF (and PNG preview) exist in S3.
-5. Emit ``pipeline-status.json`` for the dashboard / GitHub Pages site, plus a
+5. Emit ``pipeline-status.json`` for the operator console / GitHub Pages site, plus a
    human-readable report in the Actions log and job summary.
 
 Exits non-zero on any failure, so the workflow fails loudly instead of silently
@@ -235,6 +235,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             },
             "ndwi": {"mean": item.get("NdwiMean")},
             "outputKey": item.get("OutputKey"),
+            "manifestKey": item.get("ManifestKey"),
+            "terrain": {
+                "vegetationPct": item.get("VegetationPct"),
+                "bareGroundPct": item.get("BareGroundPct"),
+                "waterPct": item.get("WaterPct"),
+            },
+            "mobility": {"class": item.get("TerrainClass"), "reason": item.get("TerrainReason")},
+            "handling": {"caveat": item.get("HandlingCaveat"), "processorVersion": item.get("ProcessorVersion")},
             "outputSizeBytes": item.get("OutputSizeBytes"),
             "previewKey": item.get("PreviewKey"),
             "bounds": item.get("Bounds"),

@@ -29,7 +29,10 @@ validate: ## cfn-lint the SAM template and validate it with the SAM CLI
 local: ## Full pipeline against mocked AWS (S3 -> Lambda -> S3 + DynamoDB)
 	$(PYTHON) scripts/local_e2e.py --outdir artifacts
 
-frontend: ## Regenerate the dashboard assets from src/indices.py and embed them
+change-demo: ## Two epochs of the sample tile -> artefacts plus a change report
+	$(PYTHON) scripts/make_change_demo.py
+
+frontend: ## Regenerate the console assets from src/indices.py and embed them
 	$(PYTHON) frontend/make_ndvi_preview.py
 	$(PYTHON) frontend/embed_assets.py
 	$(PYTHON) frontend/publish_status.py --site-dir _site --status frontend/pipeline-status.json
@@ -49,7 +52,7 @@ e2e: ## Upload a synthetic GeoTIFF to the deployed stack and verify the async re
 	$(PYTHON) tests/generate_and_upload_test.py --bucket "$(RAW_BUCKET)" --region $(REGION) \
 		--status-file pipeline-status.json
 
-seed: ## Drop three demo scenes into the raw bucket for the dashboard
+seed: ## Drop three demo scenes into the raw bucket for the console
 	$(PYTHON) tests/seed_bucket.py --bucket "$(RAW_BUCKET)" --region $(REGION) --count 3
 
 clean: ## Remove build/test artefacts

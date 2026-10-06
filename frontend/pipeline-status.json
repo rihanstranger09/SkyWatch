@@ -1,89 +1,101 @@
 {
-  "source": "embedded-fallback",
-  "generatedAt": "2026-10-03T06:57:00+00:00",
-  "stack": "skywatch-isr-line",
+  "source": "local-demo",
+  "generatedAt": "2026-10-06T04:39:25+00:00",
+  "stack": "skywatch-isr-line (local)",
   "region": "ap-south-1",
-  "github": {
-    "repository": null,
-    "runNumber": null,
-    "sha": null,
-    "runUrl": null
-  },
+  "github": null,
   "image": {
-    "id": "ci-test-raster",
-    "key": "ci-test-raster.tif",
+    "id": "local-demo",
+    "key": "collections/local-demo.tif",
     "bucket": "skywatch-isr-collections-000000000000",
     "sizeBytes": 872979,
-    "width": 256,
-    "height": 256,
-    "bands": 4,
+    "width": 256.0,
+    "height": 256.0,
+    "bands": 4.0,
     "crs": "EPSG:4326",
     "origin": [
       77.59,
       12.97
     ],
-    "pixelSize": 0.0001
+    "pixelSize": 0.0001,
+    "sceneNdviMean": null
   },
   "result": {
     "status": "SUCCEEDED",
-    "durationMs": 117,
-    "wallClockMs": 842,
+    "durationMs": 93.0,
+    "wallClockMs": 158,
+    "pollAttempts": 1,
     "ndvi": {
-      "mean": 0.23163,
-      "min": -0.74354,
-      "max": 0.87101,
-      "std": 0.34979,
+      "mean": 0.5549,
+      "min": -0.747129,
+      "max": 0.917927,
+      "std": 0.416243,
       "validPixelPct": 100.0
     },
     "ndwi": {
-      "mean": -0.20745
+      "mean": -0.511949
     },
-    "outputKey": "products/ci-test-raster_ndvi_cog.tif",
-    "outputSizeBytes": 463090,
-    "previewKey": "previews/ci-test-raster_ndvi.png",
+    "outputKey": "products/local-demo_ndvi_cog.tif",
+    "outputSizeBytes": 463090.0,
+    "previewKey": "previews/local-demo_ndvi.png",
+    "manifestKey": "manifests/local-demo_manifest.json",
     "bounds": [
       77.59,
       12.9444,
       77.6156,
       12.97
-    ]
+    ],
+    "terrain": {
+      "vegetationPct": 80.34,
+      "bareGroundPct": 1.92,
+      "waterPct": 13.49,
+      "sparsePct": 4.25
+    },
+    "mobility": {
+      "class": "RESTRICTED",
+      "reason": "water present (13.5% of scene)"
+    },
+    "handling": {
+      "caveat": "UNCLASSIFIED",
+      "processorVersion": "2.0.0"
+    }
   },
   "stages": [
     {
       "name": "Upload",
       "status": "success",
-      "durationMs": 214,
-      "detail": "ci-test-raster.tif \u2192 s3://collections/"
+      "durationMs": null,
+      "detail": "collections/local-demo.tif"
     },
     {
       "name": "S3 notification",
       "status": "success",
-      "durationMs": 68,
-      "detail": "ObjectCreated:* \u2192 collection-processing-queue"
+      "durationMs": null,
+      "detail": "ObjectCreated:* -> SQS"
     },
     {
       "name": "Lambda (container)",
       "status": "success",
-      "durationMs": 117,
-      "detail": "NDVI mean 0.2316 \u00b7 256\u00d7256 px"
+      "durationMs": 93.0,
+      "detail": "NDVI mean 0.5549"
     },
     {
-      "name": "COG + DynamoDB write",
+      "name": "Product + manifest",
       "status": "success",
-      "durationMs": 96,
-      "detail": "products/ci-test-raster_ndvi_cog.tif"
+      "durationMs": null,
+      "detail": "manifests/local-demo_manifest.json"
     },
     {
-      "name": "Preview render",
+      "name": "Record",
       "status": "success",
-      "durationMs": 41,
-      "detail": "previews/ci-test-raster_ndvi.png"
+      "durationMs": null,
+      "detail": "RESTRICTED terrain \u00b7 UNCLASSIFIED"
     },
     {
       "name": "Verification",
       "status": "success",
-      "durationMs": 106,
-      "detail": "COG header + PNG re-read with rasterio"
+      "durationMs": null,
+      "detail": "local"
     }
   ],
   "checks": [
@@ -93,19 +105,19 @@
       "detail": "463090 bytes"
     },
     {
-      "name": "COG header readable (rasterio)",
-      "ok": true,
-      "detail": "GTiff \u00b7 2 bands \u00b7 EPSG:4326 \u00b7 tiled"
-    },
-    {
       "name": "PNG preview present",
       "ok": true,
-      "detail": "previews/ci-test-raster_ndvi.png"
+      "detail": "previews/local-demo_ndvi.png"
     },
     {
-      "name": "DynamoDB record Status=SUCCEEDED",
+      "name": "Lineage manifest present",
       "ok": true,
-      "detail": "ImageId=ci-test-raster"
+      "detail": "manifests/local-demo_manifest.json"
+    },
+    {
+      "name": "Terrain class assigned",
+      "ok": true,
+      "detail": "RESTRICTED - water present (13.5% of scene)"
     }
   ]
 }

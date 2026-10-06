@@ -47,14 +47,18 @@ image, deploys the stack with AWS SAM and **verifies the asynchronous result on 
 | 1 | A `.tif` / `.tiff` object lands in `s3://skywatch-isr-collections-<account>/` | S3 publishes an `ObjectCreated:*` notification to SQS |
 | 2 | `collection-processing-queue` delivers the event to the Lambda | Container Lambda (GDAL + rasterio baked in) starts |
 | 3 | Lambda reads Red / Green / NIR bands | `NDVI = (NIR − RED) / (NIR + RED)`, `NDWI = (GREEN − NIR) / (GREEN + NIR)` |
-| 4 | Lambda writes outputs | `products/<id>_ndvi_cog.tif` (COG, NDVI + NDWI bands) and `previews/<id>_ndvi.png` |
-| 5 | Lambda upserts metadata | DynamoDB `CollectionMetadata` record: bounds, CRS, index statistics, sizes, timings |
-| 6 | Failures | Retried 3× by SQS, then parked in `collection-processing-dlq`; CloudWatch alarm fires |
+| 4 | Lambda writes outputs | `products/<id>_ndvi_cog.tif` (COG, NDVI + NDWI bands), `previews/<id>_ndvi.png` and `manifests/<id>_manifest.json` (lineage + handling) |
+| 5 | Lambda classifies the ground | terrain composition (vegetation / bare ground / water / sparse) and a mobility screen: `GO`, `SLOW GO`, `RESTRICTED`, `NO GO` |
+| 6 | Lambda upserts metadata | DynamoDB `CollectionMetadata` record: bounds, CRS, index statistics, terrain class, caveat, sizes, timings |
+| 7 | Failures | Retried 3× by SQS, then parked in `collection-processing-dlq`; CloudWatch alarm fires |
 
 Two things make this repo useful rather than a toy:
 
-- **The maths is decoupled from the cloud.** `src/indices.py` is pure NumPy — so NDVI/NDWI are unit-tested
-  in ~50 ms with no AWS, no GDAL, no credentials.
+- **The maths is decoupled from the cloud.** `src/indices.py` is pure NumPy — so NDVI/NDWI *and* the terrain
+  classifier are unit-tested in milliseconds with no AWS, no GDAL, no credentials.
+- **Products carry their own provenance.** Every published product ships with a manifest naming the exact
+  source object and its ETag, the band selection, the index and terrain results, the operator's handling
+  caveat and the retention window — so a product can be re-verified rather than trusted.
 - **The pipeline is verified, not assumed.** The GitHub Actions integration test uploads a synthetic
   4-band GeoTIFF, polls DynamoDB for the asynchronous result, re-opens the produced COG with rasterio and
   publishes a run snapshot the operator console renders.
@@ -118,6 +122,7 @@ decouples ingest bursts (a sortie landing 400 frames at once) from concurrency.
 │   └── requirements.txt               # pinned runtime dependencies
 ├── tests/
 │   ├── test_processor.py              # spectral index unit tests
+│   ├── test_terrain_and_change.py     # terrain classifier, mobility screen, manifests, change detection
 │   ├── test_handler.py                # moto-mocked S3 → Lambda → DynamoDB end-to-end tests
 │   ├── synth.py                       # synthetic Bengaluru GeoTIFF generator (shared fixture)
 │   ├── generate_and_upload_test.py    # the CI integration test (upload, poll, verify, report)
@@ -132,7 +137,7 @@ decouples ingest bursts (a sortie landing 400 frames at once) from concurrency.
 │   └── local_e2e.py                   # whole pipeline on mocked AWS + status snapshot
 ├── template.yaml                      # AWS SAM: S3, SQS, DLQ, DynamoDB, Lambda, alarm, outputs
 ├── samconfig.toml                     # zero-configuration `sam deploy` (ap-south-1 by default)
-├── Makefile                           # make lint / test / local / deploy / e2e
+├── Makefile                           # make lint / test / local / change-demo / deploy / e2e
 ├── LICENSE
 └── README.md
 ```
@@ -148,7 +153,7 @@ cd skywatch-isr-line
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 make install                                           # test + lint dependencies
 
-make test      # 40 unit / integration tests, all mocked with moto
+make test      # 67 unit / integration tests, all mocked with moto
 make lint      # flake8 --max-line-length=120
 make local     # runs the FULL pipeline against mocked AWS
 ```
@@ -160,11 +165,27 @@ make local     # runs the FULL pipeline against mocked AWS
 ▌ Stage 2/4  SQS-delivered event -> container Lambda (moto-backed)
 ▌ Stage 3/4  verify outputs
    COG      : products/local-demo_ndvi_cog.tif (…)
-   NDVI     : mean=0.4… min=-0.5… max=0.9… valid=100.0%
+   preview  : previews/local-demo_ndvi.png (…)
+   manifest : manifests/local-demo_manifest.json
+   NDVI     : mean=0.5549 min=-0.747 max=0.918 valid=100.0%
+   terrain  : 80.3% vegetation · 1.9% bare ground · 13.5% water · mobility RESTRICTED
 ▌ Stage 4/4  write the run snapshot
 artifacts/local-demo-ndvi-cog.tif
 artifacts/local-demo-ndvi-preview.png        # colour-mapped NDVI preview
 artifacts/pipeline-status.json               # feed it to the operator console
+```
+
+Screen two collections of the same ground for change — no AWS, no downloads:
+
+```bash
+make change-demo      # renders two epochs of the sample tile and compares them
+```
+
+```
+epoch A :   SLOW GO · 65.28% vegetation
+epoch B : RESTRICTED · 43.98% vegetation
+verdict : SURFACE LOSS  -  34.4% of scene lost index value
+report  : artifacts/change-report.json        # per-epoch statistics, deltas, mobility
 ```
 
 Preview the console locally: open `frontend/index.html` and drop `artifacts/pipeline-status.json` onto it
@@ -226,7 +247,7 @@ To tear everything down: `sam delete --stack-name skywatch-isr-line`.
 
 | Stage | Job | What it proves | Credentials needed |
 | --- | --- | --- | --- |
-| 1 | `test` | flake8 clean, 40 tests green (moto-mocked S3/DynamoDB), `cfn-lint` + `sam validate --lint` pass | none |
+| 1 | `test` | flake8 clean, 67 tests green (moto-mocked S3/DynamoDB), `cfn-lint` + `sam validate --lint` pass | none |
 | 2 + 3 | `deploy` | the OCI image builds, pushes to ECR and `sam deploy` converges the CloudFormation stack | AWS secrets |
 | 4 | `integration-test` | a real synthetic GeoTIFF travels S3 → SQS → Lambda → S3 + DynamoDB and the output COG is re-read | AWS secrets |
 
@@ -279,11 +300,15 @@ products — they describe ground, not people.
 | Terrain & trafficability | vegetation density and surface moisture across a route or landing zone | NDVI + NDWI |
 | Cover & concealment survey | where canopy and dense vegetation actually are, updated from the latest collection | NDVI |
 | Water & waterlogging | standing water and saturated ground, including after heavy rainfall | NDWI |
-| Change detection across epochs | two collections of the same area compared band-for-band (`make e2e` proves the second run) | NDVI delta |
+| Change detection across epochs | two collections of the same area compared band-for-band — `make change-demo` runs the whole comparison offline and writes `artifacts/change-report.json` | NDVI delta |
 | HADR / flood response support | a coarse, georeferenced water picture to brief relief movement into an area | NDWI |
 
-Every product is a georeferenced COG with a matching metadata record: bounds, CRS, index statistics, timings
-and the source object it came from — so a product can always be traced back to its collection.
+Every product is a georeferenced COG with a matching metadata record and manifest: bounds, CRS, index
+statistics, terrain composition, mobility screen, handling caveat, timings and the source object it came
+from — so a product can always be traced back to its collection.
+
+The terrain classifier is one function, `src/indices.py:terrain_composition()`, and it is the *only* one in
+the repository: the worker, the console's sample scene and the deck all report the same numbers from it.
 
 ---
 
@@ -299,7 +324,13 @@ each collection's footprint is bounded and predictable.
 | Product store | private, SSE (AES256) | COG + preview render, expired after **7 days** (`ProcessedRetentionDays`) |
 | Queue | visibility timeout > function timeout, DLQ after 3 attempts, alarm on queue depth | one message |
 | Metadata | on-demand capacity, TTL on `ExpiresAt` | one item, auto-expired after 30 days |
+| Lineage manifest | one JSON per product, written beside it in the product store | source object + ETag, band selection, terrain and index results, caveat, retention |
+| Handling | `HandlingCaveat` parameter, stamped on the record and the manifest | `UNCLASSIFIED` by default — set your own releasability statement at deploy time |
 | Logs | structured JSON per stage | a few KB, 14-day retention |
+
+Every product states how it may be handled and where it came from, and the worker never infers a
+classification: `HandlingCaveat` is a deploy-time parameter, defaulting to the most permissive string rather
+than a guess at something more restrictive.
 
 Retention is enforced by the platform rather than by convention:
 
@@ -307,6 +338,7 @@ Retention is enforced by the platform rather than by convention:
 - `AbortIncompleteMultipartUpload` discards half-transferred collections,
 - DynamoDB items carry `ExpiresAt`, and the table has **TTL enabled**,
 - the worker's role is scoped to one collection store, one product store, one table and one queue,
+- the manifest store is write-only for the worker and read-only for reviewers,
 - `MaximumConcurrency: 5` on the SQS event source means a bulk ingest cannot oversubscribe the line.
 
 > Take the line down between exercises: `sam delete --stack-name skywatch-isr-line`. Redeploying is one
@@ -323,6 +355,7 @@ Retention is enforced by the platform rather than by convention:
 | `skywatch-isr-collections-<account>` | any key ending `.tif` / `.tiff` | input rasters, deleted after 3 days |
 | `skywatch-isr-products-<account>` | `products/` | `<image-id>_ndvi_cog.tif` — COG, band 1 NDVI, band 2 NDWI, float32, DEFLATE |
 | `skywatch-isr-products-<account>` | `previews/` | `<image-id>_ndvi.png` — colour-mapped NDVI thumbnail |
+| `skywatch-isr-products-<account>` | `manifests/` | `<image-id>_manifest.json` — lineage: source object + ETag, bands, indices, terrain, mobility, caveat, retention |
 
 `<image-id>` is the source filename without extension (`collections/bengaluru_2026_03.tif` → `bengaluru_2026_03`).
 
@@ -348,6 +381,10 @@ their `dtype_max`, and nodata pixels become `NaN` so they never distort statisti
 | `Width`, `Height`, `BandCount`, `Crs`, `Bounds` | N/S/L | Raster profile |
 | `NdviMean`, `NdviMin`, `NdviMax`, `NdviStd`, `ValidPixelPct` | N | Index statistics over valid pixels only |
 | `NdwiMean`, `NdwiMin`, `NdwiMax` | N | Water index statistics |
+| `VegetationPct`, `BareGroundPct`, `WaterPct` | N | Terrain composition over analysed pixels |
+| `TerrainClass`, `TerrainReason` | S | Mobility screen (`GO` / `SLOW GO` / `RESTRICTED` / `NO GO`) and why |
+| `HandlingCaveat`, `ProcessorVersion` | S | Handling caveat and the worker version that produced the record |
+| `ManifestKey` | S | Lineage manifest beside the product (`manifests/<id>_manifest.json`) |
 | `DurationMs`, `CreatedAt`, `UpdatedAt`, `ExpiresAt` | N/S | Timings, TTL (30 days) |
 
 Records are idempotent: a redelivered SQS message for an already-`SUCCEEDED` tile short-circuits instead of
@@ -360,16 +397,19 @@ recomputing, which bounds repeated work on redelivery.
 | Layer | File | What it covers |
 | --- | --- | --- |
 | Pure maths | `tests/test_processor.py` | NDVI/NDWI ranges, zero-division guards, nodata propagation, uint16 scaling, preview ramp |
-| AWS integration (mocked) | `tests/test_handler.py` | full S3 → Lambda → S3 + DynamoDB path with `moto`, COG band correctness vs. recomputed NDVI, uint16 + scale metadata, corrupt/3-band rasters, batch item failures, idempotency |
+| Terrain & change | `tests/test_terrain_and_change.py` | composition split, mobility classes and their reasons, masked-pixel handling, manifest provenance/handling/caveat, change verdicts, mismatched-grid rejection |
+| AWS integration (mocked) | `tests/test_handler.py` | full S3 → Lambda → S3 + DynamoDB path with `moto`, COG band correctness vs. recomputed NDVI, uint16 + scale metadata, corrupt/3-band rasters, batch item failures, idempotency, terrain fields on the record, the manifest written beside the product, and a manifest failure that must not lose the product |
 | Real AWS (post-deploy) | `tests/generate_and_upload_test.py` | the asynchronous production path, plus COG header re-read and status snapshot |
 | Infrastructure | `cfn-lint`, `sam validate --lint` | template validity and best practices |
 | Frontend build | `tests/test_frontend_build.py` | status injection is surgical, the publisher degrades to the committed fallback, embedded assets decode to a square float32 grid |
 | Frontend (headless) | `frontend-quality.yml` | console is self-contained (no external scripts/styles/data URIs only), the fallback snapshot parses, the Pages artefact boots |
 
 ```bash
-pytest tests/ -k ndvi -q                    # just the index maths
+pytest tests/ -q                            # 67 tests, 93 % coverage on src/
+pytest tests/ -k terrain -q                 # just the terrain + change analysis
 pytest tests/test_handler.py -vv            # the mocked AWS path
 python scripts/local_e2e.py                 # the whole thing, locally
+make change-demo                            # two epochs compared, offline
 ```
 
 ---
@@ -393,7 +433,12 @@ pipeline:
   scale bar, pins, click-to-inspect) when it is not, so the console works fully offline;
 - **the result explorer** — the NDVI render produced by `src/indices.py` is embedded as a data URI and painted
   into the overlay canvas with an opacity slider, alongside the scene's real statistics and a STAC item;
-- the architecture table (local path → deployed service) and the run's checks.
+- **the terrain assessment** — under the index figures the inspector reports water and bare-ground shares, the
+  mobility screen (`GO` / `SLOW GO` / `RESTRICTED` / `NO GO`) with the reason behind it, and the handling caveat.
+  For the run the console was published from, these are the values the worker recorded; for sample scenes they
+  are the same classifier applied in the browser, and the row says which it is;
+- the architecture table (local path → deployed service), the run's checks, and a STAC item that carries the
+  mobility class, the handling caveat, a no-person-data statement and a link to the product's lineage manifest.
 
 It is **genuinely self-contained**: the NDVI render and the scene metadata (produced by the pipeline's own
 maths) are embedded, so the page renders identically from a downloaded file, behind a corporate proxy, inside a
@@ -414,7 +459,7 @@ python frontend/publish_status.py      # build the _site/ artefact for GitHub Pa
 Enable it once: **Settings → Pages → Source: GitHub Actions**. After that:
 
 - the `integration-test` job publishes the freshly generated snapshot,
-- `publish-dashboard.yml` republishes on frontend-only changes.
+- `publish-dashboard.yml` republishes the console on frontend-only changes.
 
 Both use `actions/upload-pages-artifact@v3` + `actions/deploy-pages@v4`; the deploy step is
 `continue-on-error` so a Pages misconfiguration can never fail the actual pipeline run.

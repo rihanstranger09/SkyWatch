@@ -42,6 +42,14 @@ try:  # deployed layout: handler.py + indices.py sit flat in ${LAMBDA_TASK_ROOT}
         index_stats,
         ndvi_to_rgb,
         normalize_band,
+        terrain_composition,
+        trafficability,
+    )
+    from lineage import (
+        PROCESSOR_VERSION,
+        build_manifest,
+        handling_caveat,
+        manifest_key,
     )
 except ImportError:  # repo layout: `pytest` / `python scripts/local_e2e.py`
     from src.indices import (  # type: ignore[no-redef]
@@ -51,6 +59,14 @@ except ImportError:  # repo layout: `pytest` / `python scripts/local_e2e.py`
         index_stats,
         ndvi_to_rgb,
         normalize_band,
+        terrain_composition,
+        trafficability,
+    )
+    from src.lineage import (  # type: ignore[no-redef]
+        PROCESSOR_VERSION,
+        build_manifest,
+        handling_caveat,
+        manifest_key,
     )
 
 SCHEMA_VERSION = 1
@@ -330,6 +346,12 @@ def process_object(bucket: str, key: str, size_bytes: Optional[int] = None) -> D
         ExpiresAt=int(time.time()) + ttl_seconds,
     )
 
+    caveat = handling_caveat()
+    try:  # the source ETag lets a reviewer re-verify the exact object processed
+        source_etag = _s3().head_object(Bucket=bucket, Key=key).get("ETag", "").strip('"') or None
+    except Exception:
+        source_etag = None
+
     workdir = os.path.join(_env("TMP_DIR", "/tmp"), f"geo-{uuid.uuid4().hex[:12]}")
     os.makedirs(workdir, exist_ok=True)
     local_tif = os.path.join(workdir, "input.tif")
@@ -350,6 +372,10 @@ def process_object(bucket: str, key: str, size_bytes: Optional[int] = None) -> D
         stats = index_stats(ndvi)
         water = index_stats(ndwi)
         cloud_free = float(np.mean(np.isfinite(ndvi)) * 100.0)
+
+        # Terrain analysis: turn the index grid into statements about ground.
+        composition = terrain_composition(ndvi, ndwi)
+        mobility = trafficability(composition)
 
         _write_cog(raw_out, cog_out, context, ndvi, ndwi)
 
@@ -388,11 +414,65 @@ def process_object(bucket: str, key: str, size_bytes: Optional[int] = None) -> D
             "NdwiMin": water["min"],
             "NdwiMax": water["max"],
             "CloudFreePct": round(cloud_free, 3),
+            # terrain analysis
+            "VegetationPct": composition["vegetationPct"],
+            "BareGroundPct": composition["bareGroundPct"],
+            "WaterPct": composition["waterPct"],
+            "SparsePct": composition["sparsePct"],
+            "TerrainClass": mobility["class"],
+            "TerrainReason": mobility["reason"],
+            # handling and provenance
+            "HandlingCaveat": caveat,
+            "ProcessorVersion": PROCESSOR_VERSION,
             "DurationMs": duration_ms,
             "CreatedAt": created_at,
             "UpdatedAt": _now().isoformat(),
             "ExpiresAt": int(time.time()) + ttl_seconds,
         }
+
+        # Every product ships with its lineage: what it came from, what was done to
+        # it, what it contains and how it may be handled.
+        try:
+            manifest = build_manifest(
+                image_id=image_id,
+                source={"bucket": bucket, "key": key, "sizeBytes": size_bytes, "etag": source_etag},
+                product={
+                    "bucket": output_bucket,
+                    "key": output_key,
+                    "sizeBytes": os.path.getsize(cog_out),
+                    "previewKey": preview_key,
+                    "profile": {
+                        "driver": "GTiff",
+                        "tiled": True,
+                        "compress": "deflate",
+                        "dtype": "float32",
+                        "crs": context["crs"],
+                        "width": context["width"],
+                        "height": context["height"],
+                    },
+                },
+                indices={"ndvi": stats, "ndwi": water},
+                terrain=composition,
+                mobility=mobility,
+                processing={
+                    "bands": {"red": red_band, "green": green_band, "nir": nir_band},
+                    "durationMs": duration_ms,
+                    "cloudFreePct": round(cloud_free, 3),
+                },
+                region=_env("AWS_REGION", _env("AWS_DEFAULT_REGION", "")),
+                caveat=caveat,
+            )
+            manifest_out = os.path.join(workdir, "manifest.json")
+            with open(manifest_out, "w", encoding="utf-8") as fh:
+                json.dump(manifest, fh, indent=2, default=str)
+            manifest_object_key = manifest_key(image_id, _env("MANIFEST_PREFIX", "manifests/"))
+            _s3().upload_file(manifest_out, output_bucket, manifest_object_key,
+                              ExtraArgs={"ContentType": "application/json"})
+            record["ManifestKey"] = manifest_object_key
+        except Exception as manifest_exc:  # a manifest failure must not lose the product
+            LOG.warning(json.dumps({"event": "manifest_failed", "image_id": image_id,
+                                    "error": str(manifest_exc)}))
+
         _record(image_id, **record)
         LOG.info(json.dumps({"event": "processed", "image_id": image_id, "duration_ms": duration_ms, **stats}))
         return record

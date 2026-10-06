@@ -154,3 +154,87 @@ def stacking_shape(*arrays: np.ndarray) -> Tuple[int, int]:
     if len(unique) != 1:
         raise ValueError(f"band shapes must match exactly, got {sorted(unique)}")
     return unique.pop()
+
+
+# --------------------------------------------------------------------------- #
+# Terrain analysis - the decision-support layer
+#
+# An index grid on its own tells an analyst very little. These two functions turn
+# it into statements about ground: what fraction of the area is under canopy,
+# vegetation-free, or wet, and whether that ground is likely to support movement.
+#
+# Thresholds are conventional and deliberately coarse - this is a screening aid
+# for imagery triage, not a substitute for a terrain analysis team.
+# --------------------------------------------------------------------------- #
+
+#: NDVI cut-offs used for the composition split.
+VEGETATION_NDVI = 0.35
+SPARSE_NDVI = 0.10
+#: NDWI cut-off for open water / saturated ground.
+WATER_NDWI = 0.10
+
+
+def terrain_composition(
+    ndvi: np.ndarray,
+    ndwi: Optional[np.ndarray] = None,
+    vegetation_threshold: float = VEGETATION_NDVI,
+    sparse_threshold: float = SPARSE_NDVI,
+    water_threshold: float = WATER_NDWI,
+) -> Dict[str, float]:
+    """Split a scene into canopy / bare ground / water / other, in percent.
+
+    Only finite pixels are counted, so masked or unwritten areas cannot fake a
+    composition figure.
+    """
+    ndvi = to_float32(ndvi)
+    finite = np.isfinite(ndvi)
+    total = int(np.count_nonzero(finite))
+    if total == 0:
+        return {"vegetationPct": 0.0, "bareGroundPct": 0.0, "waterPct": 0.0,
+                "sparsePct": 0.0, "otherPct": 0.0, "analysedPixelPct": 0.0}
+
+    water = np.zeros_like(finite)
+    if ndwi is not None:
+        ndwi = to_float32(ndwi)
+        water = finite & np.isfinite(ndwi) & (ndwi > water_threshold)
+
+    vegetation = finite & ~water & (ndvi > vegetation_threshold)
+    sparse = finite & ~water & (ndvi > sparse_threshold) & (ndvi <= vegetation_threshold)
+    bare = finite & ~water & (ndvi <= sparse_threshold)
+    other = finite & ~vegetation & ~sparse & ~bare & ~water
+
+    pct = lambda mask: round(100.0 * float(np.count_nonzero(mask)) / total, 2)  # noqa: E731
+    return {
+        "vegetationPct": pct(vegetation),
+        "bareGroundPct": pct(bare),
+        "waterPct": pct(water),
+        "sparsePct": pct(sparse),
+        "otherPct": pct(other),
+        "analysedPixelPct": round(100.0 * total / ndvi.size, 2),
+    }
+
+
+def trafficability(composition: Dict[str, float]) -> Dict[str, str]:
+    """Screen a :func:`terrain_composition` result for likely vehicle mobility.
+
+    Returns a class and the reason for it. Classes are advisory:
+
+    ``NO GO``        standing water dominates the scene
+    ``RESTRICTED``   significant water, or closed canopy with no clearings
+    ``SLOW GO``      mixed ground - expect reduced cross-country speed
+    ``GO``           open or sparsely vegetated ground
+    """
+    water = float(composition.get("waterPct") or 0.0)
+    vegetation = float(composition.get("vegetationPct") or 0.0)
+    bare = float(composition.get("bareGroundPct") or 0.0)
+    sparse = float(composition.get("sparsePct") or 0.0)
+
+    if water >= 35.0:
+        return {"class": "NO GO", "reason": f"{water:.1f}% standing water in the scene"}
+    if water >= 12.0:
+        return {"class": "RESTRICTED", "reason": f"water present ({water:.1f}% of scene)"}
+    if vegetation >= 70.0 and bare + sparse < 10.0:
+        return {"class": "RESTRICTED", "reason": f"closed canopy, few clearings ({vegetation:.1f}% vegetation)"}
+    if vegetation >= 35.0:
+        return {"class": "SLOW GO", "reason": f"mixed vegetation cover ({vegetation:.1f}% vegetation)"}
+    return {"class": "GO", "reason": f"predominantly open ground ({bare + sparse:.1f}% bare or sparse)"}

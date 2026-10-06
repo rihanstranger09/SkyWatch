@@ -7,6 +7,14 @@ Description: >
   Single-region deployment, encrypted at rest, least-privilege worker role.
 
 Parameters:
+  HandlingCaveat:
+    Type: String
+    Default: UNCLASSIFIED
+    MinLength: 1
+    MaxLength: 64
+    Description: >-
+      Handling caveat stamped on every metadata record and lineage manifest. Set this to the
+      releasability statement your organisation requires for the imagery this line processes.
   ProcessedRetentionDays:
     Type: Number
     Default: 7
@@ -196,6 +204,8 @@ Resources:
           GREEN_BAND: '2'
           NIR_BAND: '4'
           RECORD_TTL_DAYS: '30'
+          HANDLING_CAVEAT: !Ref HandlingCaveat
+          MANIFEST_PREFIX: manifests/
           LOG_LEVEL: INFO
       Policies:
         - S3ReadPolicy:

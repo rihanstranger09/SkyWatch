@@ -30,7 +30,21 @@
     "std": 0.340181,
     "valid_pixel_pct": 100.0
   },
+  "terrain": {
+    "vegetationPct": 36.72,
+    "bareGroundPct": 16.07,
+    "waterPct": 14.45,
+    "sparsePct": 32.75,
+    "otherPct": 0.0,
+    "analysedPixelPct": 100.0
+  },
+  "mobility": {
+    "class": "RESTRICTED",
+    "reason": "water present (14.4% of scene)"
+  },
   "vegetationPct": 36.72,
-  "waterPct": 4.18,
-  "bareSoilPct": 32.75
+  "bareGroundPct": 16.07,
+  "bareSoilPct": 16.07,
+  "waterPct": 14.45,
+  "sparsePct": 32.75
 }

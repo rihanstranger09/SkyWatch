@@ -1,6 +1,6 @@
 name: Frontend Quality Check
 
-# Fast, credential-free gate that runs only when the dashboard changes.
+# Fast, credential-free gate that runs only when the operator console changes.
 # The frontend is an offline, single-file, dependency-free page - so the checks
 # are: does it exist, does it still self-contain, does the embedded fallback
 # status parse, and does the Pages publisher survive a dry run?
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   validate-frontend:
-    name: Validate Dashboard Bundle
+    name: Validate Console Bundle
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -37,7 +37,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest flake8
 
-      - name: Check dashboard bundle integrity
+      - name: Check console bundle integrity
         run: |
           set -euo pipefail
           test -f frontend/index.html || { echo "frontend/index.html is missing"; exit 1; }
@@ -67,7 +67,7 @@ jobs:
           for what, pattern in (("map host", r'id="world"'), ("stage strip", r'id="flow"'),
                                 ("SVG map engine", r"<svg"), ("living background", r"@keyframes bdrift")):
               if not re.search(pattern, html, re.I):
-                  errors.append(f"expected {what} in the dashboard ({pattern})")
+                  errors.append(f"expected {what} in the operator console ({pattern})")
           if 'class="balloon' not in html or 'class="bglayer' not in html:
               errors.append("the animated background layers are missing")
 

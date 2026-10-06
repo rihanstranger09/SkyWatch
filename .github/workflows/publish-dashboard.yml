@@ -57,7 +57,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "### Dashboard published"
+            echo "### Operator console published"
             echo ""
             echo "| Item | Value |"
             echo "| --- | --- |"

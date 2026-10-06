@@ -21,6 +21,7 @@ import rasterio
 from moto import mock_aws
 
 from src import handler
+from src import lineage
 from src.indices import compute_ndvi
 from synth import build_scene, make_geotiff_bytes
 
@@ -115,6 +116,72 @@ def test_processes_raster_end_to_end(aws):
     assert float(item["ValidPixelPct"]) == pytest.approx(100.0, abs=0.01)
     assert item["DurationMs"] >= 0
     assert item["ExpiresAt"] > int(time.time())
+
+    # terrain analysis: the record must say what the ground looks like, not just quote an index
+    assert 0.0 <= float(item["VegetationPct"]) <= 100.0
+    assert 0.0 <= float(item["BareGroundPct"]) <= 100.0
+    assert 0.0 <= float(item["WaterPct"]) <= 100.0
+    assert item["TerrainClass"] in {"GO", "SLOW GO", "RESTRICTED", "NO GO"}
+    assert item["TerrainReason"]
+
+    # handling and provenance
+    assert item["HandlingCaveat"] == "UNCLASSIFIED" or isinstance(item["HandlingCaveat"], str)
+    assert item["ProcessorVersion"] == lineage.PROCESSOR_VERSION
+
+
+def test_product_ships_with_a_lineage_manifest(aws):
+    payload = make_geotiff_bytes(seed=5)
+    key = "collections/manifest-case.tif"
+    aws.s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=payload)
+
+    handler.lambda_handler(_sqs_event(RAW_BUCKET, key, len(payload), message_id="m-manifest"), _context())
+
+    item = aws.table.get_item(Key={"ImageId": "manifest-case"})["Item"]
+    manifest_key = item["ManifestKey"]
+    assert manifest_key == "manifests/manifest-case_manifest.json"
+
+    manifest = json.loads(aws.s3.get_object(Bucket=PROCESSED_BUCKET, Key=manifest_key)["Body"].read())
+    assert manifest["manifestVersion"] == 1
+    assert manifest["collection"]["sourceKey"] == key
+    assert manifest["collection"]["sourceEtag"], "the source ETag is what lets a reviewer re-verify the input"
+    assert manifest["product"]["key"] == item["OutputKey"]
+    assert manifest["product"]["profile"]["crs"] == "EPSG:4326"
+    assert manifest["analysis"]["mobility"]["class"] == item["TerrainClass"]
+    assert manifest["analysis"]["terrain"]["vegetationPct"] == float(item["VegetationPct"])
+    assert manifest["handling"]["caveat"] == item["HandlingCaveat"]
+    assert manifest["handling"]["retention"]["recordTtlDays"] >= 1
+    assert manifest["processor"]["version"] == lineage.PROCESSOR_VERSION
+
+
+def test_operator_caveat_is_stamped_on_record_and_manifest(aws, monkeypatch):
+    monkeypatch.setenv("HANDLING_CAVEAT", "TRAINING USE ONLY")
+    payload = make_geotiff_bytes(seed=6)
+    key = "collections/caveat-case.tif"
+    aws.s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=payload)
+
+    handler.lambda_handler(_sqs_event(RAW_BUCKET, key, len(payload), message_id="m-caveat"), _context())
+
+    item = aws.table.get_item(Key={"ImageId": "caveat-case"})["Item"]
+    assert item["HandlingCaveat"] == "TRAINING USE ONLY"
+    manifest = json.loads(aws.s3.get_object(Bucket=PROCESSED_BUCKET, Key=item["ManifestKey"])["Body"].read())
+    assert manifest["handling"]["caveat"] == "TRAINING USE ONLY"
+
+
+def test_a_manifest_failure_does_not_lose_the_product(aws, monkeypatch):
+    def explode(*args, **kwargs):
+        raise RuntimeError("manifest store unavailable")
+
+    monkeypatch.setattr(handler, "build_manifest", explode)
+    payload = make_geotiff_bytes(seed=7)
+    key = "collections/manifest-failure-case.tif"
+    aws.s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=payload)
+
+    handler.lambda_handler(_sqs_event(RAW_BUCKET, key, len(payload), message_id="m-mf"), _context())
+
+    item = aws.table.get_item(Key={"ImageId": "manifest-failure-case"})["Item"]
+    assert item["Status"] == "SUCCEEDED", "the product is the primary output; the manifest is metadata"
+    assert "ManifestKey" not in item
+    assert aws.s3.head_object(Bucket=PROCESSED_BUCKET, Key=item["OutputKey"])
 
 
 def test_output_cog_bands_match_ndvi_maths(aws):

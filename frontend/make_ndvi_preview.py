@@ -30,7 +30,14 @@ from rasterio.errors import NotGeoreferencedWarning
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.indices import compute_ndvi, compute_ndwi, index_stats, ndvi_to_rgb  # noqa: E402
+from src.indices import (  # noqa: E402
+    compute_ndvi,
+    compute_ndwi,
+    index_stats,
+    ndvi_to_rgb,
+    terrain_composition,
+    trafficability,
+)
 
 ASSETS = ROOT / "frontend" / "assets"
 HERO_SIZE = 512
@@ -212,6 +219,8 @@ def main() -> int:
 
     ndvi = compute_ndvi(scene["red"], scene["nir"])
     ndwi = compute_ndwi(scene["green"], scene["nir"])
+    composition = terrain_composition(ndvi, ndwi)
+    mobility = trafficability(composition)
 
     # 1. Matrices for the interactive canvas (base64 float32, decoded in the browser).
     ndvi_matrix = downsample_mean(ndvi, MATRIX_SIZE)
@@ -250,9 +259,16 @@ def main() -> int:
         "bounds": [ORIGIN[0], ORIGIN[1] - HERO_SIZE * PIXEL_SIZE, ORIGIN[0] + HERO_SIZE * PIXEL_SIZE, ORIGIN[1]],
         "ndvi": stats,
         "ndwi": water_stats,
-        "vegetationPct": round(100.0 * float(np.mean(ndvi > 0.35)), 2),
-        "waterPct": round(100.0 * float(np.mean(scene["water_mask"] > 0.35)), 2),
-        "bareSoilPct": round(100.0 * float(np.mean((ndvi > 0.1) & (ndvi <= 0.35))), 2),
+        # Terrain composition is produced by the same classifier the worker applies to
+        # every collection (src/indices.py:terrain_composition), so the scene shown here
+        # and the products written by the line can never drift apart.
+        "terrain": composition,
+        "mobility": mobility,
+        "vegetationPct": composition["vegetationPct"],
+        "bareGroundPct": composition["bareGroundPct"],
+        "bareSoilPct": composition["bareGroundPct"],  # retained key name
+        "waterPct": composition["waterPct"],
+        "sparsePct": composition["sparsePct"],
     }
     (ASSETS / "scene-meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
@@ -268,7 +284,9 @@ def main() -> int:
         path = ASSETS / name
         print(f"  {name:22s} {path.stat().st_size / 1024:8.1f} KiB")
     print(f"  NDVI mean/min/max: {stats['mean']} / {stats['min']} / {stats['max']}")
-    print(f"  vegetation {meta['vegetationPct']}%  water {meta['waterPct']}%  bare soil {meta['bareSoilPct']}%")
+    print(f"  terrain   : {meta['vegetationPct']}% vegetation · {meta['bareGroundPct']}% bare ground · "
+          f"{meta['waterPct']}% water · {meta['sparsePct']}% sparse")
+    print(f"  mobility  : {meta['mobility']['class']} - {meta['mobility']['reason']}")
     return 0
 
 

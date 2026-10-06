@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inline the dashboard's data assets into ``frontend/index.html``.
+"""Inline the operator console's data assets into ``frontend/index.html``.
 
 The console is designed to work with **zero network access**: opened straight
 from disk, served from GitHub Pages, or rendered inside a sandboxed preview

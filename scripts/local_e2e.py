@@ -106,10 +106,14 @@ def main() -> int:
             (outdir / "local-demo-ndvi-preview.png").write_bytes(preview)
         print(f"   COG      : {item['OutputKey']} ({len(cog)} bytes)")
         print(f"   preview  : {preview_key} ({len(preview) if preview else 0} bytes)")
+        print(f"   manifest : {item.get('ManifestKey', 'not written')}")
         print(f"   NDVI     : mean={item['NdviMean']} min={item['NdviMin']} max={item['NdviMax']} valid={item['ValidPixelPct']}%")
+        print(f"   terrain  : {item.get('VegetationPct')}% vegetation · {item.get('BareGroundPct')}% bare ground · "
+              f"{item.get('WaterPct')}% water · mobility {item.get('TerrainClass')}")
+        print(f"   handling : {item.get('HandlingCaveat')} · processor {item.get('ProcessorVersion')}")
         print(f"   duration : {item['DurationMs']} ms")
 
-        banner("Stage 4/4  write dashboard snapshot")
+        banner("Stage 4/4  write the run snapshot")
         status = {
             "source": "local-demo",
             "generatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -145,24 +149,40 @@ def main() -> int:
                 "outputKey": item["OutputKey"],
                 "outputSizeBytes": item["OutputSizeBytes"],
                 "previewKey": preview_key,
+                "manifestKey": item.get("ManifestKey"),
                 "bounds": item["Bounds"],
+                "terrain": {
+                    "vegetationPct": item.get("VegetationPct"),
+                    "bareGroundPct": item.get("BareGroundPct"),
+                    "waterPct": item.get("WaterPct"),
+                    "sparsePct": item.get("SparsePct"),
+                },
+                "mobility": {"class": item.get("TerrainClass"), "reason": item.get("TerrainReason")},
+                "handling": {"caveat": item.get("HandlingCaveat"), "processorVersion": item.get("ProcessorVersion")},
             },
             "stages": [
                 {"name": "Upload", "status": "success", "durationMs": None, "detail": KEY},
                 {"name": "S3 notification", "status": "success", "durationMs": None, "detail": "ObjectCreated:* -> SQS"},
                 {"name": "Lambda (container)", "status": "success", "durationMs": item["DurationMs"], "detail": f"NDVI mean {item['NdviMean']}"},
-                {"name": "S3 + DynamoDB write", "status": "success", "durationMs": None, "detail": item["OutputKey"]},
+                {"name": "Product + manifest", "status": "success", "durationMs": None,
+                 "detail": item.get("ManifestKey") or item["OutputKey"]},
+                {"name": "Record", "status": "success", "durationMs": None,
+                 "detail": f'{item.get("TerrainClass", "n/a")} terrain · {item.get("HandlingCaveat", "n/a")}'},
                 {"name": "Verification", "status": "success", "durationMs": None, "detail": "local"},
             ],
             "checks": [
                 {"name": "Processed COG present in S3", "ok": True, "detail": f"{len(cog)} bytes"},
                 {"name": "PNG preview present", "ok": bool(preview), "detail": preview_key or "disabled"},
+                {"name": "Lineage manifest present", "ok": bool(item.get("ManifestKey")),
+                 "detail": item.get("ManifestKey") or "not written"},
+                {"name": "Terrain class assigned", "ok": bool(item.get("TerrainClass")),
+                 "detail": f'{item.get("TerrainClass")} - {item.get("TerrainReason")}'},
             ],
         }
         status_path = outdir / "pipeline-status.json"
         status_path.write_text(json.dumps(jsonable(status), indent=2), encoding="utf-8")
         print(f"   wrote {status_path.relative_to(ROOT)}")
-        print("   copy it to frontend/pipeline-status.json to preview the live board\n")
+        print("   copy it to frontend/pipeline-status.json to preview the operator console\n")
 
     banner("LOCAL END-TO-END RUN PASSED ✅")
     return 0
