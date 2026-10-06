@@ -1,17 +1,23 @@
-# 🛰️ Satellite & Drone Imagery Pipeline — Event-Driven, ₹0/Month, Fully Automated
+# 🛰️ SkyWatch — ISR Imagery Processing Line
 
-An end-to-end, **event-driven geospatial processing platform on AWS** that ingests satellite/drone GeoTIFFs,
-computes vegetation (NDVI) and water (NDWI) indices inside a containerised AWS Lambda, writes Cloud-Optimized
-GeoTIFF outputs back to S3 and a metadata record to DynamoDB — then **proves it works on every push** with a
-GitHub Actions pipeline that builds the image, deploys the stack with AWS SAM, and runs a synthetic-raster
-integration test.
+An end-to-end, **event-driven imagery exploitation platform on AWS** for defence ISR workflows. Electro-optical
+collections — satellite downlink products or UAV sortie frames — land in the collection store; a containerised
+worker computes vegetation (**NDVI**) and water (**NDWI**) indices, publishes a Cloud-Optimized GeoTIFF product
+plus a preview render, and records every collection with its provenance. A GitHub Actions pipeline builds the
+image, deploys the stack with AWS SAM and **verifies the asynchronous result on every push**.
 
-[![Geospatial Pipeline CI/CD](https://github.com/rihanstranger09/SkyWatch/actions/workflows/deploy-pipeline.yml/badge.svg)](https://github.com/rihanstranger09/SkyWatch/actions/workflows/deploy-pipeline.yml)
+> **Scope.** SkyWatch implements the *processing, exploitation and dissemination* (PED) layer of an ISR
+> workflow. It contains no command-and-control, no targeting logic and no classified data. The pilot collection
+> is synthetic; the worker, the indices and the product format are the real thing, and the same code path runs
+> on a laptop, on a CI runner and on deployed infrastructure.
+
+[![ISR Line CI/CD](https://github.com/rihanstranger09/SkyWatch/actions/workflows/deploy-pipeline.yml/badge.svg)](https://github.com/rihanstranger09/SkyWatch/actions/workflows/deploy-pipeline.yml)
 [![Frontend Quality](https://github.com/rihanstranger09/SkyWatch/actions/workflows/frontend-quality.yml/badge.svg)](https://github.com/rihanstranger09/SkyWatch/actions/workflows/frontend-quality.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11-3776ab.svg)
-![Runtime](https://img.shields.io/badge/Lambda-container%20image-ff9900.svg)
-![Cost](https://img.shields.io/badge/monthly%20cost-%E2%82%B90-22c55e.svg)
+![Runtime](https://img.shields.io/badge/worker-container%20image-ff9900.svg)
+![Region](https://img.shields.io/badge/deploy-ap--south--1%20(Mumbai)-4E5D6E.svg)
+![Products](https://img.shields.io/badge/products-COG%20%2B%20NDVI%20%2F%20NDWI-6E7A44.svg)
 
 ---
 
@@ -24,10 +30,11 @@ integration test.
 - [Deploying to AWS](#deploying-to-aws)
 - [CI/CD on GitHub Actions](#cicd-on-github-actions)
 - [Required GitHub secrets](#required-github-secrets)
-- [The ₹0 budget maths](#the-₹0-budget-maths)
 - [Data contract](#data-contract)
 - [Testing strategy](#testing-strategy)
-- [Live dashboard (GitHub Pages)](#live-dashboard-github-pages)
+- [Operational use cases](#operational-use-cases)
+- [Operational posture](#operational-posture)
+- [Operator console (GitHub Pages)](#operator-console-github-pages)
 - [Troubleshooting](#troubleshooting)
 - [Security notes & hardening path](#security-notes--hardening-path)
 
@@ -37,12 +44,12 @@ integration test.
 
 | Step | Trigger | Result |
 | --- | --- | --- |
-| 1 | A `.tif` / `.tiff` object lands in `s3://satellite-drone-raw-<account>/` | S3 publishes an `ObjectCreated:*` notification to SQS |
-| 2 | `imagery-processing-queue` delivers the event to the Lambda | Container Lambda (GDAL + rasterio baked in) starts |
+| 1 | A `.tif` / `.tiff` object lands in `s3://skywatch-isr-collections-<account>/` | S3 publishes an `ObjectCreated:*` notification to SQS |
+| 2 | `collection-processing-queue` delivers the event to the Lambda | Container Lambda (GDAL + rasterio baked in) starts |
 | 3 | Lambda reads Red / Green / NIR bands | `NDVI = (NIR − RED) / (NIR + RED)`, `NDWI = (GREEN − NIR) / (GREEN + NIR)` |
-| 4 | Lambda writes outputs | `processed-imagery/<id>_ndvi_cog.tif` (COG, NDVI + NDWI bands) and `previews/<id>_ndvi.png` |
-| 5 | Lambda upserts metadata | DynamoDB `ImageryMetadata` record: bounds, CRS, index statistics, sizes, timings |
-| 6 | Failures | Retried 3× by SQS, then parked in `imagery-processing-dlq`; CloudWatch alarm fires |
+| 4 | Lambda writes outputs | `products/<id>_ndvi_cog.tif` (COG, NDVI + NDWI bands) and `previews/<id>_ndvi.png` |
+| 5 | Lambda upserts metadata | DynamoDB `CollectionMetadata` record: bounds, CRS, index statistics, sizes, timings |
+| 6 | Failures | Retried 3× by SQS, then parked in `collection-processing-dlq`; CloudWatch alarm fires |
 
 Two things make this repo useful rather than a toy:
 
@@ -50,7 +57,7 @@ Two things make this repo useful rather than a toy:
   in ~50 ms with no AWS, no GDAL, no credentials.
 - **The pipeline is verified, not assumed.** The GitHub Actions integration test uploads a synthetic
   4-band GeoTIFF, polls DynamoDB for the asynchronous result, re-opens the produced COG with rasterio and
-  publishes a run snapshot the dashboard renders.
+  publishes a run snapshot the operator console renders.
 
 ---
 
@@ -66,29 +73,28 @@ Two things make this repo useful rather than a toy:
                        └──────────────────────────────────────────────────────────────────────────────────────┘
 
   Runtime (ap-south-1)
-  ┌────────────────┐   ObjectCreated:*.tif    ┌──────────────────────────┐   batch of 1   ┌───────────────────────────┐
-  │ S3 raw bucket  │─────────────────────────▶│ SQS imagery-processing-  │───────────────▶│ Lambda (container image)  │
-  │ raw-imagery/   │                          │ queue  (visibility 360s) │                │  rasterio + GDAL + numpy  │
-  └────────────────┘                          └───────────┬──────────────┘                └───────┬───────────────────┘
-                                                          │ 3 failed receives                          │
-                                                          ▼                                            │ COG + PNG
-                                              ┌────────────────────────┐                                 ▼
-                                              │ SQS dead-letter queue  │                     ┌──────────────────────────┐
-                                              │ + CloudWatch alarm     │                     │ S3 processed bucket      │
-                                              └────────────────────────┘                     │ processed-imagery/       │
-                                                                                             │ previews/                │
-                                                                                             └───────────┬──────────────┘
-                                                                                                         │ metadata
-                                                                                                         ▼
-                                                                                             ┌──────────────────────────┐
-                                                                                             │ DynamoDB ImageryMetadata │
-                                                                                             │ PK: ImageId · TTL 30d    │
-                                                                                             └──────────────────────────┘
+  ┌────────────────────┐  ObjectCreated:*.tif  ┌───────────────────────────┐  batch of 1  ┌──────────────────────────┐
+  │ Collection store   │─────────────────────▶│ SQS collection-processing-│─────────────▶│ Worker (container image) │
+  │ collections/       │                      │ queue   (visibility 360s) │              │ rasterio + GDAL + numpy  │
+  └────────────────────┘                      └────────────┬──────────────┘              └────────┬─────────────────┘
+                                                           │ 3 failed receives                  │ COG + PNG
+                                                           ▼                                    ▼
+                                               ┌────────────────────────┐             ┌──────────────────────────┐
+                                               │ SQS dead-letter queue  │             │ Product store            │
+                                               │ + CloudWatch alarm     │             │ products/                │
+                                               └────────────────────────┘             │ previews/                │
+                                                                                      └───────────┬──────────────┘
+                                                                                                  │ metadata
+                                                                                                  ▼
+                                                                                      ┌──────────────────────────┐
+                                                                                      │ DynamoDB CollectionMeta  │
+                                                                                      │ PK: ImageId · TTL 30d    │
+                                                                                      └──────────────────────────┘
 ```
 
 **Why SQS in the middle?** S3 → Lambda direct invocation has no retry buffer and no dead-letter story; SQS adds
 buffering, a visibility timeout matched to the Lambda timeout, automatic retry, and a DLQ you can inspect. It also
-decouples ingest bursts (a drone flight uploading 400 tiles) from concurrency.
+decouples ingest bursts (a sortie landing 400 frames at once) from concurrency.
 
 ---
 
@@ -99,11 +105,11 @@ decouples ingest bursts (a drone flight uploading 400 tiles) from concurrency.
 ├── .github/
 │   └── workflows/
 │       ├── deploy-pipeline.yml        # Stage 1-4 CI/CD: test → image → SAM deploy → e2e verify
-│       ├── frontend-quality.yml       # self-containment + fallback-data checks for the dashboard
+│       ├── frontend-quality.yml       # self-containment + fallback-data checks for the console
 │       └── publish-dashboard.yml      # republishes Pages when only frontend/ changes
 ├── frontend/
 │   ├── index.html                     # fully animated ops console (single file, zero dependencies)
-│   ├── pipeline-status.json           # committed fallback snapshot for the dashboard
+│   ├── pipeline-status.json           # committed fallback snapshot for the operator console
 │   └── publish_status.py              # builds the GitHub Pages artefact (_site/)
 ├── src/
 │   ├── Dockerfile                     # Lambda container runtime (rasterio/GDAL via manylinux wheels)
@@ -116,7 +122,7 @@ decouples ingest bursts (a drone flight uploading 400 tiles) from concurrency.
 │   ├── synth.py                       # synthetic Bengaluru GeoTIFF generator (shared fixture)
 │   ├── generate_and_upload_test.py    # the CI integration test (upload, poll, verify, report)
 │   ├── test_integration_script.py     # tests for the CI verifier itself
-│   ├── test_frontend_build.py         # tests for the dashboard build tooling
+│   ├── test_frontend_build.py         # tests for the console build tooling
 │   ├── seed_bucket.py                 # seed demo scenes into a deployed bucket
 │   ├── conftest.py                    # sys.path bootstrap
 │   └── requirements-dev.txt           # test/lint dependencies
@@ -137,7 +143,7 @@ decouples ingest bursts (a drone flight uploading 400 tiles) from concurrency.
 
 ```bash
 git clone https://github.com/rihanstranger09/SkyWatch.git
-cd satellite-drone-pipeline
+cd skywatch-isr-line
 
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 make install                                           # test + lint dependencies
@@ -153,15 +159,15 @@ make local     # runs the FULL pipeline against mocked AWS
 ▌ Stage 1/4  synthesise GeoTIFF (Bengaluru, EPSG:4326, 4 bands)
 ▌ Stage 2/4  SQS-delivered event -> container Lambda (moto-backed)
 ▌ Stage 3/4  verify outputs
-   COG      : processed-imagery/local-demo_ndvi_cog.tif (…)
+   COG      : products/local-demo_ndvi_cog.tif (…)
    NDVI     : mean=0.4… min=-0.5… max=0.9… valid=100.0%
-▌ Stage 4/4  write dashboard snapshot
+▌ Stage 4/4  write the run snapshot
 artifacts/local-demo-ndvi-cog.tif
 artifacts/local-demo-ndvi-preview.png        # colour-mapped NDVI preview
-artifacts/pipeline-status.json               # feed it to the dashboard
+artifacts/pipeline-status.json               # feed it to the operator console
 ```
 
-Preview the dashboard locally: open `frontend/index.html` and drop `artifacts/pipeline-status.json` onto it
+Preview the console locally: open `frontend/index.html` and drop `artifacts/pipeline-status.json` onto it
 (or copy it to `frontend/pipeline-status.json` and reload).
 
 ---
@@ -181,7 +187,7 @@ Or, non-interactively (same flags the CI uses):
 
 ```bash
 sam deploy --no-confirm-changeset --no-fail-on-empty-changeset \
-  --stack-name satellite-drone-pipeline \
+  --stack-name skywatch-isr-line \
   --resolve-s3 --resolve-image-repos \
   --capabilities CAPABILITY_IAM --region ap-south-1
 ```
@@ -189,8 +195,8 @@ sam deploy --no-confirm-changeset --no-fail-on-empty-changeset \
 Then trigger it for real:
 
 ```bash
-RAW_BUCKET=$(aws cloudformation describe-stacks --stack-name satellite-drone-pipeline \
-  --query "Stacks[0].Outputs[?OutputKey=='RawImageryBucketName'].OutputValue" --output text)
+RAW_BUCKET=$(aws cloudformation describe-stacks --stack-name skywatch-isr-line \
+  --query "Stacks[0].Outputs[?OutputKey=='CollectionStoreBucketName'].OutputValue" --output text)
 
 # option A: the synthetic scene used by CI
 python tests/generate_and_upload_test.py --bucket "$RAW_BUCKET" --region ap-south-1
@@ -199,18 +205,18 @@ python tests/generate_and_upload_test.py --bucket "$RAW_BUCKET" --region ap-sout
 make seed
 
 # option C: a real GeoTIFF you already have
-aws s3 cp scene.tif "s3://$RAW_BUCKET/raw-imagery/scene.tif"
+aws s3 cp scene.tif "s3://$RAW_BUCKET/collections/scene.tif"
 ```
 
 Check the metadata that landed:
 
 ```bash
-aws dynamodb scan --table-name ImageryMetadata --max-items 5
-aws s3 ls "s3://$(aws cloudformation describe-stacks --stack-name satellite-drone-pipeline \
-  --query "Stacks[0].Outputs[?OutputKey=='ProcessedImageryBucketName'].OutputValue" --output text)/processed-imagery/"
+aws dynamodb scan --table-name CollectionMetadata --max-items 5
+aws s3 ls "s3://$(aws cloudformation describe-stacks --stack-name skywatch-isr-line \
+  --query "Stacks[0].Outputs[?OutputKey=='ProductStoreBucketName'].OutputValue" --output text)/products/"
 ```
 
-To tear everything down: `sam delete --stack-name satellite-drone-pipeline`.
+To tear everything down: `sam delete --stack-name skywatch-isr-line`.
 
 ---
 
@@ -228,10 +234,10 @@ Behaviour details worth knowing:
 
 - **PR runs stop after Stage 1** — no AWS credentials are exposed to pull requests, and nothing deploys from a fork.
 - **Only pushes to `main` deploy**; `frontend/**` and `*.md` changes skip the deploy pipeline entirely
-  (the dashboard has its own fast workflow).
+  (the console has its own fast workflow).
 - **Manual runs** (`workflow_dispatch`) can toggle the integration test on/off; they still deploy.
 - **Concurrency** is keyed per ref, so two pushes to `main` queue up instead of fighting over the stack.
-- **Job summaries** — each stage writes a Markdown table into the run summary (resources, NDVI stats, dashboard URL).
+- **Job summaries** — each stage writes a Markdown table into the run summary (resources, NDVI stats, console URL).
 - PowerShell-free, dependency-free: everything runs on `ubuntu-latest` with `actions/checkout@v4`,
   `actions/setup-python@v5`, `aws-actions/configure-aws-credentials@v4`, `aws-actions/setup-sam@v2`,
   `actions/upload-artifact@v4`, `actions/deploy-pages@v4`.
@@ -245,12 +251,12 @@ troubleshooting checklist printed in the log — a silent "green" run is worse t
 
 Settings → Secrets and variables → Actions → **New repository secret**:
 
-| Secret | Example | Purpose | Zero-cost |
+| Secret | Example | Purpose | Required |
 | --- | --- | --- | --- |
-| `AWS_ACCESS_KEY_ID` | `AKIA…` | IAM user access key with deployment rights | ✅ |
-| `AWS_SECRET_ACCESS_KEY` | `wJalr…` | IAM user secret key | ✅ |
-| `AWS_REGION` | `ap-south-1` | Region for SAM deploy and the integration test | ✅ |
-| `AWS_ACCOUNT_ID` | `123456789012` | Optional — used as a fallback for the ECR/bucket naming narrative; the workflow resolves the account from STS automatically | ✅ |
+| `AWS_ACCESS_KEY_ID` | `AKIA…` | IAM user access key with deployment rights | yes |
+| `AWS_SECRET_ACCESS_KEY` | `wJalr…` | IAM user secret key | yes |
+| `AWS_REGION` | `ap-south-1` | Region for SAM deploy and the integration test | yes |
+| `AWS_ACCOUNT_ID` | `123456789012` | Optional — used as a fallback for the ECR/bucket naming narrative; the workflow resolves the account from STS automatically | optional |
 
 Minimum IAM permissions for the deployer user (tighten with a permissions boundary in production):
 `cloudformation:*`, `s3:*` (SAM artefact + imagery buckets), `sqs:*`, `dynamodb:*`, `lambda:*`, `ecr:*`,
@@ -263,30 +269,48 @@ Minimum IAM permissions for the deployer user (tighten with a permissions bounda
 
 ---
 
-## The ₹0 budget maths
+## Operational use cases
 
-| Service | Free tier (per month) | This pipeline's usage |
+The worker's two indices answer questions that recur in terrain and area analysis. They are decision *support*
+products — they describe ground, not people.
+
+| Use case | What the product shows | Index |
 | --- | --- | --- |
-| GitHub Actions | 2,000 runner minutes (Linux, free plan) | ~8–10 min per full run ⇒ **~150+ runs/month free** |
-| Lambda (container) | 400,000 GB-s + 1M requests | 256×256 tile ≈ 1.5 s × 1.5 GB ≈ **2.3 GB-s per tile** ⇒ ~170,000 tiles |
-| S3 | 5 GB storage, 20k GET, 2k PUT | 3-day raw retention + 7-day processed retention keeps it in the low MB |
-| SQS | 1M requests | 1 send + 1 receive + 1 delete per tile |
-| DynamoDB | 25 GB + 25 WCU/25 RCU (on-demand free tier) | One tiny item per tile, TTL-cleaned after 30 days |
-| ECR | 500 MB private storage (free tier) | One image (~450 MB with GDAL wheels) — pruned by `sam deploy` on each release |
-| CloudWatch | 10 alarms + 5 GB logs | 1 DLQ alarm, 14-day log retention (configured via `LOG_LEVEL`/console) |
+| Terrain & trafficability | vegetation density and surface moisture across a route or landing zone | NDVI + NDWI |
+| Cover & concealment survey | where canopy and dense vegetation actually are, updated from the latest collection | NDVI |
+| Water & waterlogging | standing water and saturated ground, including after heavy rainfall | NDWI |
+| Change detection across epochs | two collections of the same area compared band-for-band (`make e2e` proves the second run) | NDVI delta |
+| HADR / flood response support | a coarse, georeferenced water picture to brief relief movement into an area | NDWI |
 
-Cost hygiene baked into the template:
+Every product is a georeferenced COG with a matching metadata record: bounds, CRS, index statistics, timings
+and the source object it came from — so a product can always be traced back to its collection.
 
-- raw bucket expires objects after **3 days** (`DeleteAfter3Days`), processed outputs after **7 days**
-  (`ProcessedRetentionDays` parameter),
-- `AbortIncompleteMultipartUpload` kills half-uploaded tiles,
-- DynamoDB items carry `ExpiresAt` and the table has **TTL enabled**,
-- `PAY_PER_REQUEST` everywhere — no idle capacity charges,
-- Lambda `MaximumConcurrency: 5` on the SQS event source caps runaway fan-out (and thereby cost),
-- `EphemeralStorage: 2048 MB` is free up to the 512 MB baseline + 2 GB add-on region support.
+---
 
-> Turn the stack off between demos: `sam delete --stack-name satellite-drone-pipeline`. Redeploying is one
-> `sam deploy` away, and the CI does it for you on the next push.
+## Operational posture
+
+The line is built around the collection cycle, not a standing service: nothing runs between collections, and
+each collection's footprint is bounded and predictable.
+
+| Resource | Configuration | Per-collection footprint |
+| --- | --- | --- |
+| Worker | container image (rasterio + GDAL), 1536 MB, 180 s timeout, `MaximumConcurrency: 5` | ~1.5 s per tile, fan-out capped so a bulk sortie cannot stampede the line |
+| Collection store | private, SSE (AES256), public access fully blocked | one GeoTIFF, expired after **3 days** |
+| Product store | private, SSE (AES256) | COG + preview render, expired after **7 days** (`ProcessedRetentionDays`) |
+| Queue | visibility timeout > function timeout, DLQ after 3 attempts, alarm on queue depth | one message |
+| Metadata | on-demand capacity, TTL on `ExpiresAt` | one item, auto-expired after 30 days |
+| Logs | structured JSON per stage | a few KB, 14-day retention |
+
+Retention is enforced by the platform rather than by convention:
+
+- raw collections expire after **3 days** (`DeleteAfter3Days`), products after **7 days** (`ProcessedRetentionDays`),
+- `AbortIncompleteMultipartUpload` discards half-transferred collections,
+- DynamoDB items carry `ExpiresAt`, and the table has **TTL enabled**,
+- the worker's role is scoped to one collection store, one product store, one table and one queue,
+- `MaximumConcurrency: 5` on the SQS event source means a bulk ingest cannot oversubscribe the line.
+
+> Take the line down between exercises: `sam delete --stack-name skywatch-isr-line`. Redeploying is one
+> `sam deploy` away, and CI does it for you on the next push.
 
 ---
 
@@ -296,11 +320,11 @@ Cost hygiene baked into the template:
 
 | Bucket | Prefix | Contents |
 | --- | --- | --- |
-| `satellite-drone-raw-<account>` | any key ending `.tif` / `.tiff` | input rasters, deleted after 3 days |
-| `satellite-drone-processed-<account>` | `processed-imagery/` | `<image-id>_ndvi_cog.tif` — COG, band 1 NDVI, band 2 NDWI, float32, DEFLATE |
-| `satellite-drone-processed-<account>` | `previews/` | `<image-id>_ndvi.png` — colour-mapped NDVI thumbnail |
+| `skywatch-isr-collections-<account>` | any key ending `.tif` / `.tiff` | input rasters, deleted after 3 days |
+| `skywatch-isr-products-<account>` | `products/` | `<image-id>_ndvi_cog.tif` — COG, band 1 NDVI, band 2 NDWI, float32, DEFLATE |
+| `skywatch-isr-products-<account>` | `previews/` | `<image-id>_ndvi.png` — colour-mapped NDVI thumbnail |
 
-`<image-id>` is the source filename without extension (`raw-imagery/bengaluru_2026_03.tif` → `bengaluru_2026_03`).
+`<image-id>` is the source filename without extension (`collections/bengaluru_2026_03.tif` → `bengaluru_2026_03`).
 
 ### Band contract
 
@@ -313,7 +337,7 @@ Cost hygiene baked into the template:
 Inputs are normalised to reflectance: explicit `scales`/`offsets` win, otherwise integer dtypes are divided by
 their `dtype_max`, and nodata pixels become `NaN` so they never distort statistics.
 
-### DynamoDB `ImageryMetadata`
+### DynamoDB `CollectionMetadata`
 
 | Attribute | Type | Notes |
 | --- | --- | --- |
@@ -327,7 +351,7 @@ their `dtype_max`, and nodata pixels become `NaN` so they never distort statisti
 | `DurationMs`, `CreatedAt`, `UpdatedAt`, `ExpiresAt` | N/S | Timings, TTL (30 days) |
 
 Records are idempotent: a redelivered SQS message for an already-`SUCCEEDED` tile short-circuits instead of
-recomputing, which keeps retries cheap.
+recomputing, which bounds repeated work on redelivery.
 
 ---
 
@@ -340,7 +364,7 @@ recomputing, which keeps retries cheap.
 | Real AWS (post-deploy) | `tests/generate_and_upload_test.py` | the asynchronous production path, plus COG header re-read and status snapshot |
 | Infrastructure | `cfn-lint`, `sam validate --lint` | template validity and best practices |
 | Frontend build | `tests/test_frontend_build.py` | status injection is surgical, the publisher degrades to the committed fallback, embedded assets decode to a square float32 grid |
-| Frontend (headless) | `frontend-quality.yml` | dashboard is self-contained (no external scripts/styles/data URIs only), the fallback snapshot parses, the Pages artefact boots |
+| Frontend (headless) | `frontend-quality.yml` | console is self-contained (no external scripts/styles/data URIs only), the fallback snapshot parses, the Pages artefact boots |
 
 ```bash
 pytest tests/ -k ndvi -q                    # just the index maths
@@ -350,7 +374,7 @@ python scripts/local_e2e.py                 # the whole thing, locally
 
 ---
 
-## Live dashboard (GitHub Pages)
+## Operator console (GitHub Pages)
 
 `frontend/index.html` is a single-file ops console built on a "sky & sheet" editorial design (adapted from a
 supplied layout reference, which is not redistributed in this repository), wired to this repository's real
@@ -369,7 +393,7 @@ pipeline:
   scale bar, pins, click-to-inspect) when it is not, so the console works fully offline;
 - **the result explorer** — the NDVI render produced by `src/indices.py` is embedded as a data URI and painted
   into the overlay canvas with an opacity slider, alongside the scene's real statistics and a STAC item;
-- the architecture table (local path → AWS service), the cost meter, and the run's checks.
+- the architecture table (local path → deployed service) and the run's checks.
 
 It is **genuinely self-contained**: the NDVI render and the scene metadata (produced by the pipeline's own
 maths) are embedded, so the page renders identically from a downloaded file, behind a corporate proxy, inside a
@@ -401,9 +425,9 @@ Both use `actions/upload-pages-artifact@v3` + `actions/deploy-pages@v4`; the dep
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| Integration test times out; DynamoDB has no record | Lambda never ran | `aws sqs get-queue-attributes --queue-url <url> --attribute-names ApproximateNumberOfMessages`; check the S3 notification points at `imagery-processing-queue` and the raw bucket name matches `satellite-drone-raw-<account>` |
+| Integration test times out; DynamoDB has no record | Lambda never ran | `aws sqs get-queue-attributes --queue-url <url> --attribute-names ApproximateNumberOfMessages`; check the S3 notification points at `collection-processing-queue` and the raw bucket name matches `skywatch-isr-collections-<account>` |
 | Record says `FAILED: expected at least 4 bands` | Your raster has no NIR band | Set `NIR_BAND` / `RED_BAND` / `GREEN_BAND` env vars on the function to match your sensor |
-| `AccessDenied` on `sam deploy` | Deployer IAM policy too narrow, or the ECR repo name is already taken | Add `ecr:*` + `iam:PassRole`, and let `--resolve-image-repos` create `satellite-drone-pipeline-*` repos |
+| `AccessDenied` on `sam deploy` | Deployer IAM policy too narrow, or the ECR repo name is already taken | Add `ecr:*` + `iam:PassRole`, and let `--resolve-image-repos` create `skywatch-isr-line-*` repos |
 | Image pull failure during `sam build --use-container` | Docker not running on the runner / local machine | Start Docker; the base image is public ECR (`public.ecr.aws/lambda/python:3.11`) |
 | `ResourceConflictException` on Lambda update | A previous deploy is still settling | Re-run the job; SAM retries the change set |
 | DLQ alarm in `ALARM` | Poison message (corrupt tile, wrong CRS) | Read the item's `ErrorMessage` in DynamoDB, fix the raster, re-upload |
@@ -429,9 +453,9 @@ and moving the integration test behind a `production` environment approval.
 - [ ] Batch large rasters with `rasterio.windows` + `STAC` metadata output
 - [ ] Tile-server friendly pyramid export (`rio-cogeo` overviews are already enabled)
 - [ ] Multi-index support (NDMI, NBR for burn scars) driven by a JSON config
-- [ ] CloudWatch Embedded Metric Format for per-scene NDVI dashboards
-- [ ] SAM `sam local start-api` read API for the dashboard's live data path
+- [ ] CloudWatch Embedded Metric Format for per-collection index metrics
+- [ ] SAM `sam local start-api` read API for the console's live data path
 
 ---
 
-MIT licensed. Built to run on the free tier; sized to scale when it needs to.
+MIT licensed. Built for the collection cycle: process, exploit, disseminate.

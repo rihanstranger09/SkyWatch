@@ -37,7 +37,7 @@ from synth import (  # noqa: E402
     make_geotiff_bytes,
 )
 
-DEFAULT_TABLE = "ImageryMetadata"
+DEFAULT_TABLE = "CollectionMetadata"
 DEFAULT_KEY = "ci-test-raster.tif"
 
 
@@ -196,7 +196,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     stages = [
         {"name": "Upload", "status": "success", "durationMs": int((upload_done - started_wall) * 1000), "detail": f"{len(raster)} bytes -> s3://{args.bucket}/{args.key}"},
-        {"name": "S3 notification", "status": "success", "durationMs": None, "detail": "ObjectCreated:* -> SQS imagery-processing-queue"},
+        {"name": "S3 notification", "status": "success", "durationMs": None, "detail": "ObjectCreated:* -> SQS collection-processing-queue"},
         {"name": "Lambda (container)", "status": "success", "durationMs": item.get("DurationMs"), "detail": f"NDVI mean {item.get('NdviMean')} | {item.get('Width')}x{item.get('Height')} px"},
         {"name": "S3 + DynamoDB write", "status": "success", "durationMs": None, "detail": item.get("OutputKey")},
         {"name": "Verification", "status": "success", "durationMs": int((completed - upload_done) * 1000), "detail": f"{attempts} poll attempts"},
@@ -205,7 +205,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     status = {
         "source": "github-actions" if os.environ.get("GITHUB_ACTIONS") else "local",
         "generatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "stack": os.environ.get("STACK_NAME", "satellite-drone-pipeline"),
+        "stack": os.environ.get("STACK_NAME", "skywatch-isr-line"),
         "region": args.region,
         "github": github_context(),
         "image": {

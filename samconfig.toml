@@ -11,7 +11,7 @@ cached = true
 parallel = true
 
 [default.deploy.parameters]
-stack_name = "satellite-drone-pipeline"
+stack_name = "skywatch-isr-line"
 region = "ap-south-1"
 resolve_s3 = true
 resolve_image_repos = true
@@ -19,5 +19,5 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 fail_on_empty_changeset = false
 image_repositories = []
-tags = "project=satellite-drone-pipeline owner=github-actions"
+tags = "project=skywatch-isr-line owner=github-actions"
 parameter_overrides = "ProcessedRetentionDays=7 FunctionMemorySize=1536 FunctionTimeout=180 CreateDlqAlarm=true"

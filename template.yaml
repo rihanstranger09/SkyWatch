@@ -1,10 +1,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Event-Driven Satellite & Drone Imagery Pipeline.
-  S3 (raw GeoTIFF) -> SQS (+DLQ) -> Lambda container (rasterio/GDAL, NDVI + NDWI)
-  -> Cloud-Optimized GeoTIFF in S3 + metadata record in DynamoDB.
-  Sized to stay inside the AWS Free Tier (Rs.0 / month for demo-level volume).
+  SkyWatch ISR Processing Line - event-driven exploitation of EO imagery.
+  Collection store (GeoTIFF) -> SQS (+DLQ) -> containerised worker (rasterio/GDAL,
+  NDVI + NDWI) -> Cloud-Optimized GeoTIFF product + metadata record in DynamoDB.
+  Single-region deployment, encrypted at rest, least-privilege worker role.
 
 Parameters:
   ProcessedRetentionDays:
@@ -12,7 +12,7 @@ Parameters:
     Default: 7
     MinValue: 1
     MaxValue: 365
-    Description: Days before processed COG outputs are expired from S3 (cost hygiene).
+    Description: Days before published COG products are expired from the product store (data-retention policy).
   FunctionMemorySize:
     Type: Number
     Default: 1536
@@ -29,20 +29,20 @@ Parameters:
     Type: String
     Default: 'true'
     AllowedValues: ['true', 'false']
-    Description: Create a CloudWatch alarm when the dead-letter queue is non-empty (free tier allows 10).
+    Description: Create a CloudWatch alarm that fires whenever a collection lands in the dead-letter queue.
 
 Conditions:
   CreateAlarm: !Equals [!Ref CreateDlqAlarm, 'true']
 
 Resources:
   # ---------------------------------------------------------------------------
-  # Storage: raw imagery in, processed COGs + previews out
+  # Storage: raw collections in, index products + preview renders out
   # ---------------------------------------------------------------------------
   RawImageryBucket:
     Type: AWS::S3::Bucket
     DependsOn: ImageryProcessingQueuePolicy
     Properties:
-      BucketName: !Sub 'satellite-drone-raw-${AWS::AccountId}'
+      BucketName: !Sub 'skywatch-isr-collections-${AWS::AccountId}'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -77,12 +77,12 @@ Resources:
                     Value: .tiff
       Tags:
         - Key: Project
-          Value: satellite-drone-pipeline
+          Value: skywatch-isr-line
 
   ProcessedImageryBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'satellite-drone-processed-${AWS::AccountId}'
+      BucketName: !Sub 'skywatch-isr-products-${AWS::AccountId}'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -99,25 +99,25 @@ Resources:
             ExpirationInDays: !Ref ProcessedRetentionDays
       Tags:
         - Key: Project
-          Value: satellite-drone-pipeline
+          Value: skywatch-isr-line
 
   # ---------------------------------------------------------------------------
-  # Messaging: buffered, retried, and dead-lettered work queue
+  # Messaging: buffered, retried and dead-lettered exploitation queue
   # ---------------------------------------------------------------------------
   DeadLetterQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: imagery-processing-dlq
+      QueueName: collection-processing-dlq
       MessageRetentionPeriod: 1209600
       SqsManagedSseEnabled: true
       Tags:
         - Key: Project
-          Value: satellite-drone-pipeline
+          Value: skywatch-isr-line
 
   ImageryProcessingQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: imagery-processing-queue
+      QueueName: collection-processing-queue
       VisibilityTimeout: 360
       MessageRetentionPeriod: 345600
       SqsManagedSseEnabled: true
@@ -126,7 +126,7 @@ Resources:
         maxReceiveCount: 3
       Tags:
         - Key: Project
-          Value: satellite-drone-pipeline
+          Value: skywatch-isr-line
 
   # Allows S3 to publish ObjectCreated notifications into the processing queue.
   ImageryProcessingQueuePolicy:
@@ -147,7 +147,7 @@ Resources:
               ArnEquals:
                 # Built as a string on purpose: referencing the bucket here would create a
                 # circular dependency with the bucket's own DependsOn on this policy.
-                aws:SourceArn: !Sub 'arn:aws:s3:::satellite-drone-raw-${AWS::AccountId}'
+                aws:SourceArn: !Sub 'arn:aws:s3:::skywatch-isr-collections-${AWS::AccountId}'
 
   # ---------------------------------------------------------------------------
   # Metadata: one record per processed raster (PAY_PER_REQUEST, TTL-enabled)
@@ -155,7 +155,7 @@ Resources:
   MetadataTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: ImageryMetadata
+      TableName: CollectionMetadata
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: ImageId
@@ -170,7 +170,7 @@ Resources:
         SSEEnabled: true
       Tags:
         - Key: Project
-          Value: satellite-drone-pipeline
+          Value: skywatch-isr-line
 
   # ---------------------------------------------------------------------------
   # Compute: container-image Lambda (GDAL + rasterio baked in)
@@ -189,7 +189,7 @@ Resources:
         Variables:
           OUTPUT_BUCKET: !Ref ProcessedImageryBucket
           METADATA_TABLE: !Ref MetadataTable
-          OUTPUT_PREFIX: processed-imagery/
+          OUTPUT_PREFIX: products/
           PREVIEW_PREFIX: previews/
           WRITE_PREVIEW: 'true'
           RED_BAND: '1'
@@ -199,9 +199,9 @@ Resources:
           LOG_LEVEL: INFO
       Policies:
         - S3ReadPolicy:
-            BucketName: !Sub 'satellite-drone-raw-${AWS::AccountId}'
+            BucketName: !Sub 'skywatch-isr-collections-${AWS::AccountId}'
         - S3CrudPolicy:
-            BucketName: !Sub 'satellite-drone-processed-${AWS::AccountId}'
+            BucketName: !Sub 'skywatch-isr-products-${AWS::AccountId}'
         - DynamoDBCrudPolicy:
             TableName: !Ref MetadataTable
       Events:
@@ -227,7 +227,7 @@ Resources:
     Condition: CreateAlarm
     Properties:
       AlarmName: !Sub '${AWS::StackName}-dlq-not-empty'
-      AlarmDescription: Messages landed in imagery-processing-dlq; inspect the Lambda logs.
+      AlarmDescription: Messages landed in collection-processing-dlq; inspect the Lambda logs.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -241,13 +241,13 @@ Resources:
       TreatMissingData: notBreaching
 
 Outputs:
-  RawImageryBucketName:
+  CollectionStoreBucketName:
     Description: Upload GeoTIFFs here to start the pipeline.
     Value: !Ref RawImageryBucket
     Export:
       Name: !Sub '${AWS::StackName}-RawBucket'
-  ProcessedImageryBucketName:
-    Description: Processed COGs land in processed-imagery/, PNG previews in previews/.
+  ProductStoreBucketName:
+    Description: Processed COGs land in products/, PNG previews in previews/.
     Value: !Ref ProcessedImageryBucket
     Export:
       Name: !Sub '${AWS::StackName}-ProcessedBucket'

@@ -1,7 +1,7 @@
 {
   "source": "embedded-fallback",
   "generatedAt": "2026-10-03T06:57:00+00:00",
-  "stack": "satellite-drone-pipeline",
+  "stack": "skywatch-isr-line",
   "region": "ap-south-1",
   "github": {
     "repository": null,
@@ -12,7 +12,7 @@
   "image": {
     "id": "ci-test-raster",
     "key": "ci-test-raster.tif",
-    "bucket": "satellite-drone-raw-000000000000",
+    "bucket": "skywatch-isr-collections-000000000000",
     "sizeBytes": 872979,
     "width": 256,
     "height": 256,
@@ -38,7 +38,7 @@
     "ndwi": {
       "mean": -0.20745
     },
-    "outputKey": "processed-imagery/ci-test-raster_ndvi_cog.tif",
+    "outputKey": "products/ci-test-raster_ndvi_cog.tif",
     "outputSizeBytes": 463090,
     "previewKey": "previews/ci-test-raster_ndvi.png",
     "bounds": [
@@ -53,13 +53,13 @@
       "name": "Upload",
       "status": "success",
       "durationMs": 214,
-      "detail": "ci-test-raster.tif \u2192 s3://raw-imagery/"
+      "detail": "ci-test-raster.tif \u2192 s3://collections/"
     },
     {
       "name": "S3 notification",
       "status": "success",
       "durationMs": 68,
-      "detail": "ObjectCreated:* \u2192 imagery-processing-queue"
+      "detail": "ObjectCreated:* \u2192 collection-processing-queue"
     },
     {
       "name": "Lambda (container)",
@@ -71,7 +71,7 @@
       "name": "COG + DynamoDB write",
       "status": "success",
       "durationMs": 96,
-      "detail": "processed-imagery/ci-test-raster_ndvi_cog.tif"
+      "detail": "products/ci-test-raster_ndvi_cog.tif"
     },
     {
       "name": "Preview render",

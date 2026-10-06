@@ -32,10 +32,10 @@ from src import handler  # noqa: E402
 from synth import BENGALURU_ORIGIN, DEFAULT_PIXEL_SIZE, jsonable, make_geotiff_bytes  # noqa: E402
 
 REGION = "ap-south-1"
-RAW_BUCKET = "satellite-drone-raw-000000000000"
-PROCESSED_BUCKET = "satellite-drone-processed-000000000000"
-TABLE_NAME = "ImageryMetadata"
-KEY = "raw-imagery/local-demo.tif"
+RAW_BUCKET = "skywatch-isr-collections-000000000000"
+PROCESSED_BUCKET = "skywatch-isr-products-000000000000"
+TABLE_NAME = "CollectionMetadata"
+KEY = "collections/local-demo.tif"
 
 
 def banner(text: str) -> None:
@@ -56,7 +56,7 @@ def main() -> int:
         AWS_REGION=REGION,
         OUTPUT_BUCKET=PROCESSED_BUCKET,
         METADATA_TABLE=TABLE_NAME,
-        OUTPUT_PREFIX="processed-imagery/",
+        OUTPUT_PREFIX="products/",
         PREVIEW_PREFIX="previews/",
         TMP_DIR="/tmp",
         WRITE_PREVIEW="true",
@@ -113,7 +113,7 @@ def main() -> int:
         status = {
             "source": "local-demo",
             "generatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "stack": "satellite-drone-pipeline (local)",
+            "stack": "skywatch-isr-line (local)",
             "region": REGION,
             "github": None,
             "image": {

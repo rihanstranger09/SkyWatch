@@ -1,10 +1,10 @@
-# Satellite & Drone Imagery Pipeline - developer shortcuts.
-# Region/stack defaults live in samconfig.toml (ap-south-1, satellite-drone-pipeline).
+# SkyWatch ISR Processing Line - developer shortcuts.
+# Region/stack defaults live in samconfig.toml (ap-south-1, skywatch-isr-line).
 
 PYTHON ?= python3
 REGION ?= ap-south-1
-RAW_BUCKET ?= $(shell aws cloudformation describe-stacks --stack-name satellite-drone-pipeline \
-	--region $(REGION) --query "Stacks[0].Outputs[?OutputKey=='RawImageryBucketName'].OutputValue" \
+RAW_BUCKET ?= $(shell aws cloudformation describe-stacks --stack-name skywatch-isr-line \
+	--region $(REGION) --query "Stacks[0].Outputs[?OutputKey=='CollectionStoreBucketName'].OutputValue" \
 	--output text 2>/dev/null)
 
 .PHONY: help install lint test validate local frontend frontend-check build deploy e2e seed clean

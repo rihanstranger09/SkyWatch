@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SkyWatch · Satellite &amp; Drone Imagery Pipeline</title>
-<meta name="description" content="SkyWatch — event-driven satellite and drone imagery pipeline: S3 to SQS to containerised Lambda computing NDVI/NDWI, Cloud-Optimized GeoTIFF output, DynamoDB metadata and GitHub Actions verification at Rs.0/month.">
+<title>SkyWatch · ISR Imagery Processing Line</title>
+<meta name="description" content="SkyWatch — event-driven ISR imagery processing line: collection store to SQS to containerised Lambda computing NDVI/NDWI, Cloud-Optimized GeoTIFF output, DynamoDB metadata and GitHub Actions verification at Rs.0/month.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -749,7 +749,7 @@ footer{padding:0 0 clamp(110px,14vh,170px)}
    the console renders with zero network access.
    ========================================================================== */
 /* __PIPELINE_STATUS_START__ */
-window.__PIPELINE_STATUS__ = {"source":"embedded-fallback","generatedAt":"2026-10-03T06:57:00+00:00","stack":"satellite-drone-pipeline","region":"ap-south-1","github":{"repository":null,"runNumber":null,"sha":null,"runUrl":null},"image":{"id":"ci-test-raster","key":"ci-test-raster.tif","bucket":"satellite-drone-raw-000000000000","sizeBytes":872979,"width":256,"height":256,"bands":4,"crs":"EPSG:4326","origin":[77.59,12.97],"pixelSize":0.0001},"result":{"status":"SUCCEEDED","durationMs":117,"wallClockMs":842,"ndvi":{"mean":0.23163,"min":-0.74354,"max":0.87101,"std":0.34979,"validPixelPct":100.0},"ndwi":{"mean":-0.20745},"outputKey":"processed-imagery/ci-test-raster_ndvi_cog.tif","outputSizeBytes":463090,"previewKey":"previews/ci-test-raster_ndvi.png","bounds":[77.59,12.9444,77.6156,12.97]},"stages":[{"name":"Upload","status":"success","durationMs":214,"detail":"ci-test-raster.tif \u2192 s3://raw-imagery/"},{"name":"S3 notification","status":"success","durationMs":68,"detail":"ObjectCreated:* \u2192 imagery-processing-queue"},{"name":"Lambda (container)","status":"success","durationMs":117,"detail":"NDVI mean 0.2316 \u00b7 256\u00d7256 px"},{"name":"COG + DynamoDB write","status":"success","durationMs":96,"detail":"processed-imagery/ci-test-raster_ndvi_cog.tif"},{"name":"Preview render","status":"success","durationMs":41,"detail":"previews/ci-test-raster_ndvi.png"},{"name":"Verification","status":"success","durationMs":106,"detail":"COG header + PNG re-read with rasterio"}],"checks":[{"name":"Processed COG present in S3","ok":true,"detail":"463090 bytes"},{"name":"COG header readable (rasterio)","ok":true,"detail":"GTiff \u00b7 2 bands \u00b7 EPSG:4326 \u00b7 tiled"},{"name":"PNG preview present","ok":true,"detail":"previews/ci-test-raster_ndvi.png"},{"name":"DynamoDB record Status=SUCCEEDED","ok":true,"detail":"ImageId=ci-test-raster"}]};
+window.__PIPELINE_STATUS__ = {"source":"embedded-fallback","generatedAt":"2026-10-03T06:57:00+00:00","stack":"skywatch-isr-line","region":"ap-south-1","github":{"repository":null,"runNumber":null,"sha":null,"runUrl":null},"image":{"id":"ci-test-raster","key":"ci-test-raster.tif","bucket":"skywatch-isr-collections-000000000000","sizeBytes":872979,"width":256,"height":256,"bands":4,"crs":"EPSG:4326","origin":[77.59,12.97],"pixelSize":0.0001},"result":{"status":"SUCCEEDED","durationMs":117,"wallClockMs":842,"ndvi":{"mean":0.23163,"min":-0.74354,"max":0.87101,"std":0.34979,"validPixelPct":100.0},"ndwi":{"mean":-0.20745},"outputKey":"products/ci-test-raster_ndvi_cog.tif","outputSizeBytes":463090,"previewKey":"previews/ci-test-raster_ndvi.png","bounds":[77.59,12.9444,77.6156,12.97]},"stages":[{"name":"Upload","status":"success","durationMs":214,"detail":"ci-test-raster.tif \u2192 s3://collections/"},{"name":"S3 notification","status":"success","durationMs":68,"detail":"ObjectCreated:* \u2192 collection-processing-queue"},{"name":"Lambda (container)","status":"success","durationMs":117,"detail":"NDVI mean 0.2316 \u00b7 256\u00d7256 px"},{"name":"COG + DynamoDB write","status":"success","durationMs":96,"detail":"products/ci-test-raster_ndvi_cog.tif"},{"name":"Preview render","status":"success","durationMs":41,"detail":"previews/ci-test-raster_ndvi.png"},{"name":"Verification","status":"success","durationMs":106,"detail":"COG header + PNG re-read with rasterio"}],"checks":[{"name":"Processed COG present in S3","ok":true,"detail":"463090 bytes"},{"name":"COG header readable (rasterio)","ok":true,"detail":"GTiff \u00b7 2 bands \u00b7 EPSG:4326 \u00b7 tiled"},{"name":"PNG preview present","ok":true,"detail":"previews/ci-test-raster_ndvi.png"},{"name":"DynamoDB record Status=SUCCEEDED","ok":true,"detail":"ImageId=ci-test-raster"}]};
 /* __PIPELINE_STATUS_END__ */
 
 /* __EMBEDDED_ASSETS_START__ */
@@ -817,8 +817,8 @@ window.__EMBEDDED_ASSETS__ = {
 <section class="hero" id="top">
   <div class="wrap">
     <div class="hero-top hero-e" style="animation-delay:.15s">
-      <span class="eyebrow"><span class="dot"></span><b>SkyWatch</b> — satellite &amp; drone imagery pipelines</span>
-      <span class="eyebrow">Event-driven · containerised Lambda · ₹0 to run</span>
+      <span class="eyebrow"><span class="dot"></span><b>SkyWatch</b> — ISR imagery processing lines</span>
+      <span class="eyebrow">Event-driven · containerised worker · EO imagery exploitation</span>
     </div>
 
     <div class="sheet hero-sheet hero-e" style="animation-delay:.3s">
@@ -829,8 +829,8 @@ window.__EMBEDDED_ASSETS__ = {
           </div>
         </div>
         <div class="col-right">
-          <p class="marg">An event-driven geospatial pipeline: a GeoTIFF lands in S3, SQS buffers the event, and a container-image Lambda computes NDVI and NDWI, writes a Cloud-Optimized GeoTIFF plus a preview, and records bounds, CRS and index statistics in DynamoDB.</p>
-          <p class="marg tight" style="margin-top:16px">S3 · SQS + DLQ · Lambda (rasterio + GDAL) · DynamoDB · ECR · CloudWatch · GitHub Actions.</p>
+          <p class="marg">An event-driven ISR processing line: an electro-optical collection lands in the collection store, the queue buffers the event, and a container-image worker computes the terrain indices (NDVI and NDWI), publishes a Cloud-Optimized GeoTIFF product plus a preview render, and records bounds, CRS, provenance and index statistics in DynamoDB.</p>
+          <p class="marg tight" style="margin-top:16px">Collection store · SQS + DLQ · container worker (rasterio + GDAL) · product store · DynamoDB · CloudWatch · GitHub Actions.</p>
         </div>
 
       </div>
@@ -1059,7 +1059,7 @@ window.__EMBEDDED_ASSETS__ = {
     <div class="sheet dark foot-sheet rv">
       <span class="glowblob" style="left:-90px;bottom:-120px;width:360px;height:360px;background:radial-gradient(circle,var(--lav),transparent 70%);opacity:.26"></span>
       <div class="kicker"><i></i>05 — Get started</div>
-      <h2 class="foot-big" style="margin-top:22px">Built to run at <em>zero</em> cost, ready for scale.</h2>
+      <h2 class="foot-big" style="margin-top:22px">From <em>collection</em> to decision-ready product.</h2>
       <div class="footcta">
         <button class="btn solid" id="btnFootSim"><span class="spin" hidden></span>Launch a simulation<span class="ar"></span></button>
         <button class="btn" id="btnFootBad"><span class="spin" hidden></span>Inject a corrupt file<span class="ar"></span></button>
@@ -1734,9 +1734,9 @@ const stacItem = sc => {
       'processing:level': 'L2A', 'processing:software': { skywatch: '1.0.0' }
     },
     assets: {
-      ndvi_cog: { href: `s3://satellite-drone-processed-<account>/${sc.name}/ndvi_cog.tif`, type: 'image/tiff; application=geotiff; profile=cloud-optimized', roles: ['data'] },
+      ndvi_cog: { href: `s3://skywatch-isr-products-<account>/${sc.name}/ndvi_cog.tif`, type: 'image/tiff; application=geotiff; profile=cloud-optimized', roles: ['data'] },
       preview: { href: `previews/${sc.name}_ndvi.png`, type: 'image/png', roles: ['overview'] },
-      manifest: { href: `processed-imagery/${sc.name}_ndvi_cog.tif`, type: 'application/json', roles: ['metadata'] }
+      manifest: { href: `products/${sc.name}_ndvi_cog.tif`, type: 'application/json', roles: ['metadata'] }
     },
     links: [{ rel: 'self', href: `https://github.com/rihanstranger09/SkyWatch` }, { rel: 'root', href: 'https://github.com/rihanstranger09/SkyWatch' }]
   };
@@ -1847,7 +1847,7 @@ function runDemo(scene, meta, broken) {
       j.sceneObj = sc;
       ensureRaster(sc);
       MapAPI.addPin(sc);
-      log('ok', `${scene} published in ${(j.finished - j.started).toFixed(1)}s → s3://satellite-drone-processed-<account>/`);
+      log('ok', `${scene} published in ${(j.finished - j.started).toFixed(1)}s → s3://skywatch-isr-products-<account>/`);
       toast(scene + ' complete · click to inspect', 'ok', () => { selectScene(sc.name, true); $('#explore').scrollIntoView({ behavior: 'smooth' }); }, 'ok');
       refreshStats();
       if (tracked === j.id) setTracked(j);
@@ -1980,13 +1980,13 @@ function onSnapshot(s) {
    8 · ARCHITECTURE CARDS  (3D tilt + shimmer)
    ========================================================================== */
 const ARCH = [
-  ['folder', 'scripts/local_e2e.py', 'in-memory S3 + /tmp raster', 'box', 'Amazon S3', 'raw-imagery/ bucket · 3-day lifecycle'],
+  ['folder', 'scripts/local_e2e.py', 'in-memory S3 + /tmp raster', 'box', 'Amazon S3', 'collections/ bucket · 3-day lifecycle'],
   ['event', 'S3 ObjectCreated', '.tif / .tiff suffix filter', 'bolt', 'S3 event notification', 'queue configuration on the bucket'],
   ['sqs', 'queue.Queue()', 'in-process hand-off', 'layers', 'SQS + DLQ', 'visibility 360 s · maxReceiveCount 3'],
   ['shield', 'src/indices.py', 'band shape + scale guards', 'alarm', 'CloudWatch alarm', 'fires when the DLQ is non-empty'],
   ['leaf', 'NDVI / NDWI', 'pure-numpy, 92% covered', 'bolt', 'Lambda container image', '1536 MB · 180 s · rasterio + GDAL'],
-  ['db', 'DynamoDB item', 'ImageId, stats, TTL 30 d', 'db', 'DynamoDB ImageryMetadata', 'PAY_PER_REQUEST · idempotent retries'],
-  ['globe', 'Cloud-Optimized GeoTIFF', '+ PNG preview', 'globe', 'S3 processed bucket', 'processed-imagery/ + previews/'],
+  ['db', 'DynamoDB item', 'ImageId, stats, TTL 30 d', 'db', 'DynamoDB CollectionMetadata', 'PAY_PER_REQUEST · idempotent retries'],
+  ['globe', 'Cloud-Optimized GeoTIFF', '+ PNG preview', 'globe', 'S3 processed bucket', 'products/ + previews/'],
   ['signpost', 'GitHub Actions', 'test → build → deploy → verify', 'signpost', 'GitHub Actions', '40 tests, cfn-lint, synthetic GeoTIFF e2e']
 ];
 $('#cards').innerHTML = ARCH.map((a, i) => `
@@ -2117,14 +2117,14 @@ addEventListener('scroll', () => {
     tracked = job.id;
     setTracked(job);
 
-    log('sys', `snapshot ${STATUS.generatedAt || ''} · ${STATUS.source || 'local'} · stack ${STATUS.stack || 'satellite-drone-pipeline'}`);
+    log('sys', `snapshot ${STATUS.generatedAt || ''} · ${STATUS.source || 'local'} · stack ${STATUS.stack || 'skywatch-isr-line'}`);
     log('event', `manifest.json → raw/${job.scene}.tif  (${job.meta.size}, ${img.crs || 'EPSG:4326'})`);
     log('queue', `job ${job.id.slice(-8)} enqueued · idempotency key ${job.idem} · ${STATUS.region || 'ap-south-1'}`);
     log('step', STEPMSG['Validate']);
     log('step', STEPMSG['NDVI + COG']);
     log('step', STEPMSG['Register STAC']);
     log('ok', `NDVI mean ${(+ndvi.mean).toFixed(4)} · min ${(+ndvi.min).toFixed(3)} · max ${(+ndvi.max).toFixed(3)} · valid ${ndvi.validPixelPct ?? 100}%`);
-    log('ok', `${job.scene} published → ${result.outputKey || 'processed-imagery/'} (${result.outputSizeBytes ? (result.outputSizeBytes / 1024).toFixed(0) + ' KB' : '—'})`);
+    log('ok', `${job.scene} published → ${result.outputKey || 'products/'} (${result.outputSizeBytes ? (result.outputSizeBytes / 1024).toFixed(0) + ' KB' : '—'})`);
     (STATUS.checks || []).forEach(c => log(c.ok ? 'ok' : 'fail', `${c.name} → ${c.detail || ''}`));
 
     /* scene entry, using the pipeline's own NDVI render when it is embedded */

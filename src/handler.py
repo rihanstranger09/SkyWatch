@@ -1,4 +1,4 @@
-"""AWS Lambda worker for the satellite & drone imagery pipeline.
+"""AWS Lambda worker for the SkyWatch ISR processing line.
 
 Triggered by SQS (an S3 ``ObjectCreated`` notification on every ``.tif`` /
 ``.tiff`` that lands in the raw imagery bucket). For each message the worker:
@@ -88,7 +88,7 @@ def _s3():
 def _table():
     global _metadata_table
     if _metadata_table is None:
-        _metadata_table = boto3.resource("dynamodb").Table(_env("METADATA_TABLE", "ImageryMetadata"))
+        _metadata_table = boto3.resource("dynamodb").Table(_env("METADATA_TABLE", "CollectionMetadata"))
     return _metadata_table
 
 
@@ -136,7 +136,7 @@ def _clean(value: Any) -> Any:
 
 
 def image_id_from_key(key: str) -> str:
-    """``raw-imagery/Ci-Test_Raster.tif`` -> ``Ci-Test_Raster`` (DynamoDB partition key)."""
+    """``collections/Ci-Test_Raster.tif`` -> ``Ci-Test_Raster`` (DynamoDB partition key)."""
     name = os.path.basename(key)
     stem, _ = os.path.splitext(name)
     return stem or name
@@ -304,7 +304,7 @@ def process_object(bucket: str, key: str, size_bytes: Optional[int] = None) -> D
     if not output_bucket:
         raise RuntimeError("OUTPUT_BUCKET environment variable is not set")
 
-    output_prefix = _env("OUTPUT_PREFIX", "processed-imagery/")
+    output_prefix = _env("OUTPUT_PREFIX", "products/")
     preview_prefix = _env("PREVIEW_PREFIX", "previews/")
     write_preview = _env("WRITE_PREVIEW", "true").lower() == "true"
     red_band = _env_int("RED_BAND", 1)

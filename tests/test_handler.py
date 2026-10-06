@@ -25,9 +25,9 @@ from src.indices import compute_ndvi
 from synth import build_scene, make_geotiff_bytes
 
 REGION = "ap-south-1"
-RAW_BUCKET = "satellite-drone-raw-000000000000"
-PROCESSED_BUCKET = "satellite-drone-processed-000000000000"
-TABLE_NAME = "ImageryMetadata"
+RAW_BUCKET = "skywatch-isr-collections-000000000000"
+PROCESSED_BUCKET = "skywatch-isr-products-000000000000"
+TABLE_NAME = "CollectionMetadata"
 
 
 def _context() -> SimpleNamespace:
@@ -86,7 +86,7 @@ def aws(monkeypatch):
         monkeypatch.setenv("AWS_REGION", REGION)
         monkeypatch.setenv("OUTPUT_BUCKET", PROCESSED_BUCKET)
         monkeypatch.setenv("METADATA_TABLE", TABLE_NAME)
-        monkeypatch.setenv("OUTPUT_PREFIX", "processed-imagery/")
+        monkeypatch.setenv("OUTPUT_PREFIX", "products/")
         monkeypatch.setenv("PREVIEW_PREFIX", "previews/")
         monkeypatch.setenv("TMP_DIR", "/tmp")
         handler._reset_clients()
@@ -96,7 +96,7 @@ def aws(monkeypatch):
 
 def test_processes_raster_end_to_end(aws):
     payload = make_geotiff_bytes()
-    key = "raw-imagery/ci-test-raster.tif"
+    key = "collections/ci-test-raster.tif"
     aws.s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=payload)
 
     response = handler.lambda_handler(_sqs_event(RAW_BUCKET, key, len(payload)), _context())
@@ -106,7 +106,7 @@ def test_processes_raster_end_to_end(aws):
     assert item["Status"] == "SUCCEEDED"
     assert item["SourceKey"] == key
     assert item["OutputBucket"] == PROCESSED_BUCKET
-    assert item["OutputKey"] == "processed-imagery/ci-test-raster_ndvi_cog.tif"
+    assert item["OutputKey"] == "products/ci-test-raster_ndvi_cog.tif"
     assert item["PreviewKey"] == "previews/ci-test-raster_ndvi.png"
     assert item["Width"] == 256 and item["Height"] == 256 and item["BandCount"] == 4
     assert item["Crs"] == "EPSG:4326"
@@ -119,7 +119,7 @@ def test_processes_raster_end_to_end(aws):
 
 def test_output_cog_bands_match_ndvi_maths(aws):
     payload = make_geotiff_bytes(seed=11)
-    key = "raw-imagery/seed-11.tif"
+    key = "collections/seed-11.tif"
     aws.s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=payload)
     handler.lambda_handler(_sqs_event(RAW_BUCKET, key, len(payload), message_id="m2"), _context())
 
@@ -140,7 +140,7 @@ def test_output_cog_bands_match_ndvi_maths(aws):
 
 def test_normalises_uint16_rasters_using_scale_metadata(aws):
     payload = make_geotiff_bytes(dtype="uint16", nodata=0, scale=0.0001, seed=3)
-    key = "raw-imagery/uint16-scene.tif"
+    key = "collections/uint16-scene.tif"
     aws.s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=payload)
 
     handler.lambda_handler(_sqs_event(RAW_BUCKET, key, len(payload), message_id="m3"), _context())
@@ -164,7 +164,7 @@ def test_accepts_bare_s3_event_for_local_invocation(aws):
 
 
 def test_corrupt_object_fails_and_reports_batch_item_failure(aws):
-    key = "raw-imagery/broken.tif"
+    key = "collections/broken.tif"
     aws.s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=b"this is definitely not a GeoTIFF")
 
     response = handler.lambda_handler(_sqs_event(RAW_BUCKET, key, 34, message_id="bad-1"), _context())
@@ -178,7 +178,7 @@ def test_corrupt_object_fails_and_reports_batch_item_failure(aws):
 
 def test_missing_nir_band_fails_cleanly(aws):
     payload = make_geotiff_bytes(bands=("red", "green", "blue"))
-    key = "raw-imagery/three-band.tif"
+    key = "collections/three-band.tif"
     aws.s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=payload)
 
     response = handler.lambda_handler(_sqs_event(RAW_BUCKET, key, len(payload)), _context())
@@ -188,7 +188,7 @@ def test_missing_nir_band_fails_cleanly(aws):
 
 
 def test_non_geotiff_key_is_rejected(aws):
-    key = "raw-imagery/photo.png"
+    key = "collections/photo.png"
     aws.s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=b"png")
 
     handler.lambda_handler(_sqs_event(RAW_BUCKET, key, 3, message_id="png-1"), _context())
@@ -200,7 +200,7 @@ def test_non_geotiff_key_is_rejected(aws):
 
 def test_reprocessing_is_idempotent(aws):
     payload = make_geotiff_bytes()
-    key = "raw-imagery/retry-me.tif"
+    key = "collections/retry-me.tif"
     aws.s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=payload)
 
     handler.lambda_handler(_sqs_event(RAW_BUCKET, key, len(payload), message_id="a"), _context())

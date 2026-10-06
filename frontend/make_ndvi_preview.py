@@ -79,7 +79,7 @@ def build_hero_scene(size: int = HERO_SIZE, seed: int = 21) -> dict:
 
     # Forest belt across the north, with fractal-ish edges from smoothed noise.
     noise = rng.normal(0.0, 1.0, (size, size)).astype("float32")
-    for _ in range(4):  # cheap smoothing pass: several box blurs
+    for _ in range(4):  # fast smoothing pass: several box blurs
         noise = (
             noise
             + np.roll(noise, 1, 0) + np.roll(noise, -1, 0)

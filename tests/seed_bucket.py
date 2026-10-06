@@ -3,9 +3,9 @@
 
 Useful for populating the dashboard / demoing the pipeline without satellite data:
 
-    python tests/seed_bucket.py --bucket satellite-drone-raw-<account-id> --region ap-south-1 --count 3
+    python tests/seed_bucket.py --bucket skywatch-isr-collections-<account-id> --region ap-south-1 --count 3
 
-Each scene is uploaded under ``raw-imagery/`` with a distinct seed, which triggers
+Each scene is uploaded under ``collections/`` with a distinct seed, which triggers
 the S3 -> SQS -> Lambda path exactly like a real GeoTIFF drop.
 """
 
@@ -29,10 +29,10 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--bucket", required=True, help="raw imagery bucket")
     parser.add_argument("--region", required=True)
     parser.add_argument("--count", type=int, default=3, help="number of scenes to upload")
-    parser.add_argument("--prefix", default="raw-imagery/", help="key prefix")
+    parser.add_argument("--prefix", default="collections/", help="key prefix")
     parser.add_argument("--scene-prefix", default="demo-scene", help="object name stem")
     parser.add_argument("--size", type=int, default=256, help="raster width/height in pixels")
-    parser.add_argument("--table", default="ImageryMetadata")
+    parser.add_argument("--table", default="CollectionMetadata")
     parser.add_argument("--wait", action="store_true", help="poll DynamoDB until every scene is processed")
     return parser.parse_args(argv)
 

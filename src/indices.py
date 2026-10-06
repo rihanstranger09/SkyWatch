@@ -1,4 +1,4 @@
-"""Spectral index maths for the satellite & drone imagery pipeline.
+"""Spectral index maths for the SkyWatch ISR processing line.
 
 Deliberately free of boto3 / GDAL / rasterio imports: this module only needs
 NumPy, which means the formulas can be unit-tested in milliseconds, in CI, with

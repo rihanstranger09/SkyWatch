@@ -1,4 +1,4 @@
-name: Geospatial Pipeline CI/CD
+name: ISR Processing Line CI/CD
 
 # Push to main  -> test -> container build -> SAM deploy -> end-to-end verification
 # Pull request  -> test only (fast, credential-free quality gate)
@@ -27,9 +27,9 @@ concurrency:
 
 env:
   PYTHON_VERSION: '3.11'
-  STACK_NAME: satellite-drone-pipeline
+  STACK_NAME: skywatch-isr-line
   AWS_REGION_DEFAULT: ap-south-1
-  TABLE_NAME: ImageryMetadata
+  TABLE_NAME: CollectionMetadata
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -178,8 +178,8 @@ jobs:
               --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" \
               --output text
           }
-          RAW_BUCKET="$(read_output RawImageryBucketName)"
-          PROCESSED_BUCKET="$(read_output ProcessedImageryBucketName)"
+          RAW_BUCKET="$(read_output CollectionStoreBucketName)"
+          PROCESSED_BUCKET="$(read_output ProductStoreBucketName)"
           TABLE_NAME_OUT="$(read_output MetadataTableName)"
           FUNCTION_NAME="$(read_output GeospatialProcessorFunctionName)"
           {

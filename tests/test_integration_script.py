@@ -20,9 +20,9 @@ import generate_and_upload_test as itest
 from src import handler
 
 REGION = "ap-south-1"
-RAW_BUCKET = "satellite-drone-raw-000000000000"
-PROCESSED_BUCKET = "satellite-drone-processed-000000000000"
-TABLE_NAME = "ImageryMetadata"
+RAW_BUCKET = "skywatch-isr-collections-000000000000"
+PROCESSED_BUCKET = "skywatch-isr-products-000000000000"
+TABLE_NAME = "CollectionMetadata"
 
 
 @pytest.fixture()
