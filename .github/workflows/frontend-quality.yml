@@ -49,8 +49,8 @@ jobs:
 
           # Self-contained: the page must render from its own bytes. The only
           # permitted network requests are optional enhancements that fail safe -
-          # the Leaflet map (falls back to the inline SVG engine) and webfonts
-          # (fall back to the system stack).
+          # the Leaflet map (falls back to the inline SVG engine), its open imagery
+          # tiles (placeholder + NASA fallback), and webfonts (system stack).
           scripts = re.findall(r"<script[^>]+src\s*=\s*['\"]([^'\"]+)['\"][^>]*>", html, re.I)
           if any("leaflet" not in url for url in scripts):
               errors.append(f"unexpected external script source: {scripts}")
@@ -62,6 +62,14 @@ jobs:
               errors.append(f"unexpected external stylesheet: {sheets}")
           if "data:image/png;base64," not in html:
               errors.append("no embedded preview image found - run frontend/embed_assets.py")
+
+          # The basemap must stay on open aerial-imagery services. OpenStreetMap's
+          # volunteer tile servers block applications like this console (403 grid).
+          if "tile.openstreetmap.org" in html:
+              errors.append("the console requests OpenStreetMap volunteer tiles, which are not permitted for apps")
+          for required in ("World_Imagery/MapServer/tile/{z}/{y}/{x}", "BlueMarble", "errorTileUrl"):
+              if required not in html:
+                  errors.append(f"map configuration missing: {required}")
 
           # the console itself must be present, not a stub
           for what, pattern in (("map host", r'id="world"'), ("stage strip", r'id="flow"'),

@@ -420,8 +420,8 @@ body.ready .hero-e.slide{animation-name:heroLeft}
   border:1px solid rgba(255,255,255,.8);border-radius:4px;box-shadow:0 40px 70px -40px rgba(19,30,66,.8)}
 #overlay.in{opacity:1;transform:none}
 #overlay canvas{width:100%;height:100%}
-.mapui{position:absolute;inset:0;pointer-events:none}
-.zoomctl{position:absolute;right:16px;top:16px;display:flex;flex-direction:column;gap:7px;pointer-events:auto}
+.mapui{position:absolute;inset:0;pointer-events:none;z-index:800}
+.zoomctl{position:absolute;left:16px;top:16px;display:flex;flex-direction:column;gap:7px;pointer-events:auto}
 .zbtn{width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,255,255,.9);background:rgba(255,255,255,.84);
   backdrop-filter:blur(12px);display:grid;place-items:center;color:var(--ink-2);
   box-shadow:0 14px 30px -18px rgba(19,30,66,.75);transition:.45s var(--ease)}
@@ -434,7 +434,17 @@ body.ready .hero-e.slide{animation-name:heroLeft}
 .chip-tag i{width:5px;height:5px;border-radius:50%;background:var(--indigo);display:block}
 .scalebar{position:absolute;right:16px;bottom:16px;text-align:right;font-family:var(--mono);font-size:8.5px;letter-spacing:.18em;color:var(--mut)}
 .scalebar .sb{height:6px;border:1px solid rgba(20,22,28,.4);border-top:0;margin-bottom:5px;margin-left:auto;transition:width .4s var(--ease)}
-.leaflet-container{background:#dfe7f5;font-family:var(--mono);outline:none}
+.leaflet-container{background:#E7E1D2;font-family:var(--mono);outline:none}
+.leaflet-control-layers{background:rgba(255,255,255,.9)!important;backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,.9)!important;border-radius:14px!important;
+  box-shadow:0 14px 30px -20px rgba(19,30,66,.7)!important;padding:2px 4px!important;margin:16px 16px 0 0!important;
+  font-family:var(--mono)!important;color:var(--mut)!important}
+.leaflet-control-layers-toggle{width:34px!important;height:34px!important;background-size:16px 16px!important;border-radius:11px!important}
+.leaflet-control-layers-expanded{padding:10px 12px!important}
+.leaflet-control-layers-list{font-size:9px;letter-spacing:.12em;text-transform:uppercase}
+.leaflet-control-layers-base label,.leaflet-control-layers-overlays label{display:flex;align-items:center;gap:7px;margin:0 0 5px}
+.leaflet-control-layers-separator{border-top-color:var(--line)!important;margin:6px 0!important}
+.leaflet-control-layers-selector{margin:0!important;accent-color:#4E5D6E}
 .leaflet-tile-pane{filter:saturate(.82) contrast(.98) brightness(1.02)}
 .leaflet-control-attribution{background:rgba(255,255,255,.82)!important;color:var(--mut)!important;font-size:8px!important;font-family:var(--mono);padding:2px 6px!important}
 .leaflet-control-attribution a{color:var(--ink-2)!important;text-decoration:none}
@@ -1410,14 +1420,77 @@ function initSvgMap() {
 }
 
 /* ---------- 2b · Leaflet engine ---------- */
+/* Open imagery endpoints (no API key, no attribution-free use) and the whole-Earth view. */
+const EARTH_VIEW = { center: [20.0, 78.0], zoom: 2.5 };
+const MERCATOR_LIMIT = 85.05;   // Web Mercator's own latitude limit
+const BLANK_TILE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+const TILE_UNAVAILABLE = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">' +
+  '<rect width="256" height="256" fill="#EFEADB"/>' +
+  '<text x="128" y="124" text-anchor="middle" font-family="monospace" font-size="13" fill="#8B8570">' +
+  'IMAGERY TILE UNAVAILABLE</text>' +
+  '<text x="128" y="146" text-anchor="middle" font-family="monospace" font-size="11" fill="#B3AC97">' +
+  'check network / retry</text></svg>');
+
 function initLeaflet() {
   const pinsL = new Map();
-  const map = L.map('map', { zoomControl: false, attributionControl: true, zoomSnap: .25, worldCopyJump: false })
-    .setView([13.6, 75.0], 7);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, crossOrigin: true,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  }).addTo(map);
+  const map = L.map('map', {
+    zoomControl: false, attributionControl: true, zoomSnap: .25,
+    worldCopyJump: true, minZoom: 2, maxZoom: 19, maxBoundsViscosity: .5,
+    maxBounds: L.latLngBounds([[MERCATOR_LIMIT, -720], [-MERCATOR_LIMIT, 720]])
+  }).setView(EARTH_VIEW.center, EARTH_VIEW.zoom);
+
+  /* Imagery providers — all open and reachable without an API key.
+     The console deliberately does NOT use OpenStreetMap's volunteer tile servers:
+     those exist for map editing, and their tile usage policy blocks applications
+     like this one (that is what produced the "Access blocked 403" grid).
+       Aerial  — Esri World Imagery, global aerial/satellite coverage
+       Labels  — Esri World Boundaries and Places, drawn over the imagery
+       Relief  — Esri World Shaded Relief, terrain shading
+       Earth   — NASA GIBS Blue Marble, the whole globe in one view */
+  const aerial = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19, crossOrigin: true, errorTileUrl: TILE_UNAVAILABLE,
+      attribution: 'Imagery &copy; <a href="https://www.esri.com/">Esri</a> · Maxar · Earthstar Geographics'
+    });
+  const labels = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19, crossOrigin: true, errorTileUrl: BLANK_TILE
+    });
+  const relief = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19, maxNativeZoom: 13, crossOrigin: true, errorTileUrl: TILE_UNAVAILABLE,
+      attribution: 'Relief &copy; <a href="https://www.esri.com/">Esri</a>'
+    });
+  const earth = L.tileLayer(
+    'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_ShadedRelief_Bathymetry/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg', {
+      maxZoom: 19, maxNativeZoom: 8, crossOrigin: true, errorTileUrl: TILE_UNAVAILABLE,
+      attribution: 'Whole Earth &copy; <a href="https://earthdata.nasa.gov/gibs">NASA EOSDIS GIBS</a>'
+    });
+  aerial.addTo(map);
+  labels.addTo(map);
+  L.control.layers({ 'Aerial imagery': aerial, 'Shaded relief': relief, 'Whole Earth (NASA)': earth },
+                   { 'Place names': labels },
+                   { position: 'topright', collapsed: true }).addTo(map);
+
+  /* If the imagery host is unreachable from the network the console is opened on, fall
+     back to the NASA whole-Earth layer, and say so rather than showing a broken grid. */
+  let tilesLoaded = 0, tilesFailed = 0, fellBack = false;
+  const tileFailed = () => {
+    tilesFailed++;
+    if (!tilesLoaded && !fellBack && tilesFailed >= 6) {
+      fellBack = true;
+      try { map.removeLayer(aerial); earth.addTo(map); } catch (e) { /* keep whatever we have */ }
+      toast('Imagery host unreachable - switched to the NASA whole-Earth layer', '', null, 'down');
+    } else if (!tilesLoaded && fellBack && tilesFailed >= 20) {
+      toast('Map imagery unreachable - the offline vector engine still draws the scene footprints', '', null, 'down');
+    }
+  };
+  [aerial, earth].forEach(layer => {
+    layer.on('tileload', () => { tilesLoaded++; });
+    layer.on('tileerror', tileFailed);
+  });
+
   L.control.scale({ imperial: false, position: 'bottomright', maxWidth: 110 }).addTo(map);
   worldEl.style.display = 'none';
   pinsEl.style.display = 'none';
@@ -1452,7 +1525,7 @@ function initLeaflet() {
   MapAPI.setOpacity = v => overlay && overlay.setOpacity(v);
   const bboxBounds = b => [[b[1], b[0]], [b[3], b[2]]];
   MapAPI.flyToBBox = b => map.flyToBounds(bboxBounds(b), { duration: 1.5, padding: [70, 70] });
-  MapAPI.resetView = () => map.flyTo([13.6, 75.0], 7, { duration: 1.1 });
+  MapAPI.resetView = () => map.flyTo([13.6, 75.0], 6, { duration: 1.1 });
   MapAPI.zoomIn = () => map.zoomIn();
   MapAPI.zoomOut = () => map.zoomOut();
   MapAPI.mode = 'leaflet';

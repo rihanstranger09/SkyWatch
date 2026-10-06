@@ -153,7 +153,7 @@ cd skywatch-isr-line
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 make install                                           # test + lint dependencies
 
-make test      # 67 unit / integration tests, all mocked with moto
+make test      # 68 unit / integration tests, all mocked with moto
 make lint      # flake8 --max-line-length=120
 make local     # runs the FULL pipeline against mocked AWS
 ```
@@ -247,7 +247,7 @@ To tear everything down: `sam delete --stack-name skywatch-isr-line`.
 
 | Stage | Job | What it proves | Credentials needed |
 | --- | --- | --- | --- |
-| 1 | `test` | flake8 clean, 67 tests green (moto-mocked S3/DynamoDB), `cfn-lint` + `sam validate --lint` pass | none |
+| 1 | `test` | flake8 clean, 68 tests green (moto-mocked S3/DynamoDB), `cfn-lint` + `sam validate --lint` pass | none |
 | 2 + 3 | `deploy` | the OCI image builds, pushes to ECR and `sam deploy` converges the CloudFormation stack | AWS secrets |
 | 4 | `integration-test` | a real synthetic GeoTIFF travels S3 → SQS → Lambda → S3 + DynamoDB and the output COG is re-read | AWS secrets |
 
@@ -401,11 +401,11 @@ recomputing, which bounds repeated work on redelivery.
 | AWS integration (mocked) | `tests/test_handler.py` | full S3 → Lambda → S3 + DynamoDB path with `moto`, COG band correctness vs. recomputed NDVI, uint16 + scale metadata, corrupt/3-band rasters, batch item failures, idempotency, terrain fields on the record, the manifest written beside the product, and a manifest failure that must not lose the product |
 | Real AWS (post-deploy) | `tests/generate_and_upload_test.py` | the asynchronous production path, plus COG header re-read and status snapshot |
 | Infrastructure | `cfn-lint`, `sam validate --lint` | template validity and best practices |
-| Frontend build | `tests/test_frontend_build.py` | status injection is surgical, the publisher degrades to the committed fallback, embedded assets decode to a square float32 grid |
+| Frontend build | `tests/test_frontend_build.py` | status injection is surgical, the publisher degrades to the committed fallback, embedded assets decode to a square float32 grid, the basemap stays on open aerial imagery (never OSM's volunteer tiles) |
 | Frontend (headless) | `frontend-quality.yml` | console is self-contained (no external scripts/styles/data URIs only), the fallback snapshot parses, the Pages artefact boots |
 
 ```bash
-pytest tests/ -q                            # 67 tests, 93 % coverage on src/
+pytest tests/ -q                            # 68 tests, 93 % coverage on src/
 pytest tests/ -k terrain -q                 # just the terrain + change analysis
 pytest tests/test_handler.py -vv            # the mocked AWS path
 python scripts/local_e2e.py                 # the whole thing, locally
@@ -429,8 +429,12 @@ pipeline:
   movement parallax the layers on top of all of that (the ambient pan and the parallax compose through `--px` /
   `--py`, so neither clobbers the other), and every one of these stands still for visitors who request
   `prefers-reduced-motion`;
-- **the scene map** — Leaflet when the CDN is reachable, and the built-in SVG engine (coastline, range rings,
-  scale bar, pins, click-to-inspect) when it is not, so the console works fully offline;
+- **the scene map** — a whole-Earth view of open aerial imagery (Esri World Imagery, with place names drawn as
+  an overlay), a basemap switcher for shaded relief and NASA's Blue Marble composite, and the built-in SVG
+  engine (coastline, range rings, scale bar, pins, click-to-inspect) whenever Leaflet or its tiles cannot load,
+  so the console works fully offline. OpenStreetMap's **volunteer tile servers are deliberately not used**:
+  their tile usage policy excludes applications like this console, and requesting them is what produced an
+  `Access blocked · 403` grid rather than a map;
 - **the result explorer** — the NDVI render produced by `src/indices.py` is embedded as a data URI and painted
   into the overlay canvas with an opacity slider, alongside the scene's real statistics and a STAC item;
 - **the terrain assessment** — under the index figures the inspector reports water and bare-ground shares, the
@@ -442,9 +446,11 @@ pipeline:
 
 It is **genuinely self-contained**: the NDVI render and the scene metadata (produced by the pipeline's own
 maths) are embedded, so the page renders identically from a downloaded file, behind a corporate proxy, inside a
-sandboxed iframe, or on GitHub Pages — no build step and no required network. The two external requests that
-remain (Google Fonts, Leaflet) are progressive enhancements that fail silently into the system font stack and
-the SVG map engine.
+sandboxed iframe, or on GitHub Pages — no build step and no required network. Three optional network requests
+remain, and each fails on its own: the webfonts (system font stack), the Leaflet CDN (SVG map engine) and the
+imagery tiles (a labelled placeholder tile, then an automatic switch to the NASA whole-Earth layer, then the
+offline engine's own drawing). Tiles are fetched from open providers that permit application use, and no API
+key is needed.
 
 The run snapshot comes from `frontend/pipeline-status.json` (committed fallback), and Stage 4 injects the
 real snapshot at publish time:

@@ -181,11 +181,12 @@ def test_page_ships_an_actually_animated_background():
 
 
 def test_page_uses_no_external_runtime_dependencies():
-    """Google Fonts and Leaflet are progressive enhancements only.
+    """Google Fonts, Leaflet and the map imagery tiles are enhancements only.
 
     The page must render completely from its own bytes; the only permitted
-    network fetch is the optional Leaflet loader, which falls back to the
-    built-in SVG map engine when the sandbox has no network.
+    network fetches are the optional Leaflet loader (which falls back to the
+    built-in SVG map engine when there is no network), the webfonts, and the
+    imagery tiles inside the Leaflet map - each of which degrades on its own.
     """
     html = (FRONTEND / "index.html").read_text(encoding="utf-8")
     scripts = re.findall(r"<script[^>]+src\s*=\s*['\"]([^'\"]+)['\"]", html, re.I)
@@ -199,6 +200,26 @@ def test_page_uses_no_external_runtime_dependencies():
     assert html.count("<style>") >= 1 and html.count("<script>") >= 2, "every style/behaviour must be inline"
     assert "<style>" in html and "<script>" in html
     assert "__noLeaflet" in html and "initSvgMap" in html, "the map must degrade to the offline SVG engine"
+
+
+def test_map_uses_open_aerial_imagery_not_volunteer_tile_servers():
+    """The console must never point at OpenStreetMap's volunteer tile servers.
+
+    Those servers exist for map editing; their tile usage policy excludes
+    applications like this console, and requesting them produced an
+    "Access blocked 403" grid instead of a map. The base map therefore comes
+    from open aerial-imagery services that permit application use.
+    """
+    html = (FRONTEND / "index.html").read_text(encoding="utf-8")
+
+    assert "tile.openstreetmap.org" not in html, "volunteer OSM tiles are not permitted for this console"
+    assert "World_Imagery/MapServer/tile/{z}/{y}/{x}" in html, "aerial imagery must be the base layer"
+    assert "World_Boundaries_and_Places" in html, "place names are drawn as an overlay"
+    assert "BlueMarble" in html, "a whole-Earth layer must be available"
+    assert "errorTileUrl" in html, "unreachable tiles must render a placeholder, not a broken grid"
+    assert "minZoom: 2" in html, "the whole globe must be reachable"
+    for credit in ("Esri", "NASA EOSDIS GIBS"):
+        assert credit in html, f"{credit} imagery must be credited on the map"
 
 
 def test_fallback_snapshot_has_the_dashboard_contract():
