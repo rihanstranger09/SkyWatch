@@ -147,6 +147,33 @@ def test_embedded_assets_are_present_and_valid():
     assert str(round(ndvi["mean"], 4))[:6] in block or "ndvi" in block.lower()
 
 
+def test_first_paint_is_not_gated_by_inlined_data_or_the_map_cdn():
+    """Performance contract: the bytes a visitor needs first must arrive first.
+
+    The inlined status/asset block carries the base64 NDVI render - the single
+    biggest chunk of the page. It used to sit at the very top of <body>, so the
+    browser could not paint the hero until nearly the whole document had arrived.
+    It now trails the markup, the 140 KB map library is loaded async (the inline
+    SVG engine renders the map instantly), and the third-party stylesheets are
+    preloaded instead of blocking the first paint.
+    """
+    html = (FRONTEND / "index.html").read_text(encoding="utf-8")
+
+    markup = html.index('<div class="skyveil"')
+    data_block = html.index("__EMBEDDED_ASSETS_START__")
+    assert markup < data_block, "the inlined data block must not precede the page markup"
+
+    leaflet = re.search(r"<script[^>]+src\s*=\s*['\"]https://unpkg\.com/leaflet[^>]*>", html, re.I)
+    assert leaflet, "the Leaflet loader is missing"
+    assert "async" in leaflet.group(0), "the CDN map library must not block parsing"
+
+    assert html.count('as="style"') >= 2, "webfont + map stylesheets must be preloaded, not render-blocking"
+    assert "<noscript>" in html, "the preloaded stylesheets need a no-JS fallback"
+
+    # the preloader must be time-boxed, not a fixed number of slow ticks
+    assert "requestAnimationFrame" in html and "addEventListener('load', finish" in html
+
+
 def test_page_ships_an_actually_animated_background():
     """Regression guard for the requirement that the backgrounds keep moving."""
     html = (FRONTEND / "index.html").read_text(encoding="utf-8")
